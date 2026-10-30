@@ -3,6 +3,7 @@ pub mod caddy;
 pub mod commands;
 pub mod config;
 pub mod detect;
+pub mod download;
 pub mod hosts;
 pub mod paths;
 pub mod php;
@@ -25,6 +26,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState::new(session))
         .manage(terminal::Terminals::default())
+        .manage(download::Slot::default())
         // Service menyala sendiri: membuka DevKu berarti localhost langsung hidup.
         .setup(|app| {
             let handle = app.handle().clone();
@@ -53,6 +55,9 @@ pub fn run() {
             commands::write_terminal,
             commands::resize_terminal,
             commands::close_terminal,
+            commands::php_catalog,
+            commands::install_php,
+            commands::cancel_download,
         ])
         .build(tauri::generate_context!())
         .expect("error while building DevKu");

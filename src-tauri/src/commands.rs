@@ -1,10 +1,14 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::detect;
+use crate::download::{self, PhpRelease};
+use crate::paths::Paths;
+use crate::php::PhpManager;
 use crate::session::{Session, SiteDraft, Snapshot};
 
 pub struct AppState {
@@ -39,6 +43,14 @@ fn unavailable(boot_error: &Option<String>) -> String {
     boot_error
         .clone()
         .unwrap_or_else(|| "konfigurasi belum siap".to_string())
+}
+
+async fn session_paths(state: &State<'_, AppState>) -> Result<Paths, String> {
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    Ok(session.paths().clone())
 }
 
 #[tauri::command]
@@ -158,6 +170,123 @@ pub fn close_terminal(
     id: u32,
 ) -> Result<(), String> {
     terminals.close(id).map_err(error)
+}
+
+#[derive(Serialize)]
+pub struct PhpCatalogEntry {
+    #[serde(flatten)]
+    pub release: PhpRelease,
+    pub installed: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    version: String,
+    received: u64,
+    total: Option<u64>,
+    stage: &'static str,
+}
+
+fn report(app: &AppHandle, version: &str, received: u64, total: Option<u64>, stage: &'static str) {
+    let _ = app.emit(
+        "download://progress",
+        DownloadProgress {
+            version: version.to_string(),
+            received,
+            total,
+            stage,
+        },
+    );
+}
+
+#[tauri::command]
+pub async fn php_catalog(state: State<'_, AppState>) -> Result<Vec<PhpCatalogEntry>, String> {
+    let paths = session_paths(&state).await?;
+    let client = download::client().map_err(error)?;
+    let releases = download::php_releases(&client).await.map_err(error)?;
+    let installed = PhpManager::new(paths).installed();
+
+    Ok(releases
+        .into_iter()
+        .map(|release| PhpCatalogEntry {
+            installed: installed.iter().any(|version| version == &release.version),
+            release,
+        })
+        .collect())
+}
+
+/// Mengunduh, memverifikasi SHA-256 dari releases.json, lalu memasang. Kalau
+/// ada langkah yang gagal, tidak ada folder setengah jadi yang ditinggalkan:
+/// ekstraksi baru dimulai setelah berkas utuh dan cocok.
+#[tauri::command]
+pub async fn install_php(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    slot: State<'_, download::Slot>,
+    version: String,
+) -> Result<Snapshot, String> {
+    let paths = session_paths(&state).await?;
+    let cancel = slot.begin().map_err(error)?;
+
+    let result = install_php_inner(&app, &paths, &version, &cancel).await;
+    slot.finish();
+    result.map_err(error)?;
+
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    Ok(session.snapshot().await)
+}
+
+async fn install_php_inner(
+    app: &AppHandle,
+    paths: &Paths,
+    version: &str,
+    cancel: &AtomicBool,
+) -> anyhow::Result<()> {
+    let client = download::client()?;
+    report(app, version, 0, None, "daftar");
+
+    let releases = download::php_releases(&client).await?;
+    let release = releases
+        .into_iter()
+        .find(|item| item.version == version)
+        .ok_or_else(|| anyhow::anyhow!("versi {version} tidak ada di daftar rilis PHP"))?;
+
+    let archive = paths.downloads().join(&release.filename);
+    download::download(
+        &client,
+        &release.url(),
+        &archive,
+        &release.sha256,
+        cancel,
+        |received, total| report(app, version, received, total, "unduh"),
+    )
+    .await?;
+
+    report(app, version, 0, None, "pasang");
+
+    let manager = PhpManager::new(paths.clone());
+    let install_version = version.to_string();
+    let zip = archive.clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        manager.extract(&zip, &install_version)?;
+        manager.ensure_ini(&install_version)?;
+        // Zip 35 MB tidak ada gunanya disimpan setelah diekstrak.
+        let _ = std::fs::remove_file(&zip);
+        Ok(())
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
+
+    report(app, version, 0, None, "selesai");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_download(slot: State<'_, download::Slot>) -> bool {
+    slot.cancel()
 }
 
 #[derive(Serialize)]

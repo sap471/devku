@@ -32,6 +32,10 @@ tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macr
 process-wrap = { version = "10", features = ["tokio1"] }
 portable-pty = "0.9"
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# Hanya untuk mengunduh PHP/Caddy. Di Windows native-tls memakai schannel
+# bawaan sistem, jadi tidak ada OpenSSL atau rustls yang ikut dikompilasi.
+reqwest = { version = "0.13", default-features = false, features = ["stream", "native-tls"] }
+sha2 = "0.10"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

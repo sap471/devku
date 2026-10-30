@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as terminalPanel from "./terminal";
@@ -40,6 +41,22 @@ interface RuntimeInfo {
   path: string | null;
 }
 
+interface PhpCatalogEntry {
+  branch: string;
+  version: string;
+  filename: string;
+  sha256: string;
+  size: string;
+  installed: boolean;
+}
+
+interface DownloadProgress {
+  version: string;
+  received: number;
+  total: number | null;
+  stage: string;
+}
+
 interface Detection {
   framework: string;
   label: string;
@@ -73,6 +90,11 @@ let logError: string | null = null;
 
 let runtimesList: RuntimeInfo[] | null = null;
 let runtimesError: string | null = null;
+
+let phpCatalog: PhpCatalogEntry[] | null = null;
+let phpCatalogError: string | null = null;
+let phpCatalogLoading = false;
+let download: DownloadProgress | null = null;
 
 let pollTimer: number | null = null;
 let lastSnapshotJson = "";
@@ -136,6 +158,107 @@ async function loadRuntimes(): Promise<void> {
   }
 
   if (!wizard && !selectedId) renderDetail();
+}
+
+async function loadPhpCatalog(): Promise<void> {
+  if (phpCatalog !== null || phpCatalogLoading) return;
+
+  phpCatalogLoading = true;
+  phpCatalogError = null;
+  paintCatalog();
+
+  try {
+    phpCatalog = await invoke<PhpCatalogEntry[]>("php_catalog");
+  } catch (err) {
+    phpCatalog = [];
+    phpCatalogError = String(err);
+  } finally {
+    phpCatalogLoading = false;
+    paintCatalog();
+  }
+}
+
+/// Katalog hidup di dua tempat (wizard dan panel runtime), jadi yang diperbarui
+/// saat progres berjalan hanya kotaknya, bukan seluruh panel.
+function paintCatalog(): void {
+  const node = document.getElementById("php-catalog");
+  if (node) node.innerHTML = renderPhpCatalog();
+}
+
+function renderPhpCatalog(): string {
+  if (phpCatalogError) {
+    return `<p class="field-error">${esc(phpCatalogError)}</p>`;
+  }
+  if (phpCatalog === null) {
+    return '<p class="hint">Mengambil daftar versi dari windows.php.net...</p>';
+  }
+  if (phpCatalog.length === 0) {
+    return '<p class="hint">Tidak ada versi yang bisa dipasang.</p>';
+  }
+
+  const rows = phpCatalog
+    .map((entry) => {
+      const job = download?.version === entry.version ? download : null;
+      let action: string;
+
+      if (job) {
+        const percent = job.total ? Math.min(100, (job.received / job.total) * 100) : 0;
+        action = `<span class="catalog-progress">
+            <span class="progress"><span style="width:${percent}%"></span></span>
+            <span class="hint">${esc(stageLabel(job))}</span>
+            <button class="btn btn-quiet" type="button" data-action="cancel-download">Batal</button>
+          </span>`;
+      } else if (entry.installed) {
+        action = '<span class="tag">terpasang</span>';
+      } else {
+        action = `<button class="btn" type="button" data-action="install-php" data-version="${esc(
+          entry.version,
+        )}" ${download ? "disabled" : ""}>Pasang</button>`;
+      }
+
+      return `<div class="catalog-row"><span class="catalog-version">${esc(
+        entry.version,
+      )}</span><span class="hint">${esc(entry.size)}</span>${action}</div>`;
+    })
+    .join("");
+
+  return `<div class="catalog">${rows}</div>`;
+}
+
+function stageLabel(job: DownloadProgress): string {
+  if (job.stage === "unduh") {
+    return job.total
+      ? `${megabytes(job.received)} / ${megabytes(job.total)}`
+      : `${megabytes(job.received)} terunduh`;
+  }
+  if (job.stage === "pasang") return "memasang...";
+  if (job.stage === "selesai") return "selesai";
+  return "menyiapkan...";
+}
+
+const megabytes = (bytes: number) => `${(bytes / 1_048_576).toFixed(1).replace(".", ",")} MB`;
+
+async function installPhp(version: string): Promise<void> {
+  notice = null;
+  download = { version, received: 0, total: null, stage: "daftar" };
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("install_php", { version });
+    applySnapshot(next);
+
+    if (wizard && !wizard.php && next.installed_php.includes(version)) {
+      wizard.php = version;
+    }
+  } catch (err) {
+    notice = `Gagal memasang PHP ${version}: ${String(err)}`;
+  } finally {
+    download = null;
+    // Penanda "terpasang" berubah, jadi daftar diambil ulang.
+    phpCatalog = null;
+    render();
+    void loadPhpCatalog();
+  }
 }
 
 function applySnapshot(next: Snapshot): void {
@@ -383,6 +506,7 @@ function renderDetail(): void {
   if (wizard) {
     pane.innerHTML = renderWizard();
     bindWizard();
+    if (document.getElementById("php-catalog")) void loadPhpCatalog();
     return;
   }
 
@@ -417,7 +541,14 @@ function renderDetail(): void {
           <button class="btn" type="button" data-action="refresh-runtimes">Muat ulang</button>
         </div>
         ${body}
+
+        <div class="log-head">
+          <h3>PHP</h3>
+          <button class="btn" type="button" data-action="refresh-php">Muat ulang</button>
+        </div>
+        <div id="php-catalog">${renderPhpCatalog()}</div>
       </div>`;
+    void loadPhpCatalog();
     return;
   }
 
@@ -506,7 +637,7 @@ function renderWizard(): string {
 
     const phpBlock = options
       ? `<select class="input" id="w-php">${options}</select>`
-      : `<p class="field-error">Belum ada PHP terpasang. Pasang satu versi dulu lewat <code>devku-cli install-php</code>.</p>`;
+      : '<p class="hint">Belum ada PHP terpasang. Pilih versi di bawah, DevKu yang mengunduh dan memasangnya.</p>';
 
     return `${head}
       <dl class="facts">
@@ -531,6 +662,12 @@ function renderWizard(): string {
         <label class="field-label" for="w-php">Versi PHP</label>
         ${phpBlock}
       </div>
+
+      <div class="log-head">
+        <h3>Pasang versi</h3>
+        <button class="btn" type="button" data-action="refresh-php">Muat ulang</button>
+      </div>
+      <div id="php-catalog">${renderPhpCatalog()}</div>
 
       ${w.error ? `<p class="field-error">${esc(w.error)}</p>` : ""}
 
@@ -868,6 +1005,20 @@ document.addEventListener("click", (event) => {
       renderDetail();
       void loadRuntimes();
       break;
+    case "refresh-php":
+      phpCatalog = null;
+      phpCatalogError = null;
+      paintCatalog();
+      void loadPhpCatalog();
+      break;
+    case "install-php": {
+      const version = target.dataset.version;
+      if (version) void installPhp(version);
+      break;
+    }
+    case "cancel-download":
+      void invoke("cancel_download");
+      break;
     case "start":
       void start();
       break;
@@ -890,6 +1041,11 @@ document.addEventListener("click", (event) => {
       render();
       break;
   }
+});
+
+void listen<DownloadProgress>("download://progress", (event) => {
+  download = event.payload;
+  paintCatalog();
 });
 
 if (document.readyState === "loading") {

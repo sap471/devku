@@ -71,6 +71,11 @@ impl Paths {
         self.runtime().join("logs")
     }
 
+    /// Berkas unduhan sementara (zip PHP/Caddy) sebelum dipasang.
+    pub fn downloads(&self) -> PathBuf {
+        self.runtime().join("downloads")
+    }
+
     pub fn caddyfile(&self) -> PathBuf {
         self.runtime().join("Caddyfile")
     }
