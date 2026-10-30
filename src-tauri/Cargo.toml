@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
+# Tanpa ini cargo tidak tahu mana yang harus dijalankan saat ada lebih dari
+# satu binary (devku untuk aplikasi, devku-cli untuk kontrol headless).
+default-run = "devku"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
