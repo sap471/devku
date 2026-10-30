@@ -6,8 +6,8 @@ Development environment untuk PHP di Windows: ringan, multi-PHP per domain, teri
 
 - [x] **Fase 0** — Fondasi: keputusan arsitektur, scaffold repo, spike teknis → [hasil](docs/spike-fase-0.md)
 - [x] **Fase 1** — Core services: Caddy manager, php-cgi pool + supervisor, port allocator → [hasil](docs/fase-1.md)
-- [ ] **Fase 2** - Project manager: UI daftar + wizard selesai; unduh PHP dari internet belum
-- [ ] **Fase 3** — Runtime integration: deteksi Bun/Node/PHP sistem, terminal, script runner
+- [x] **Fase 2** — Project manager: UI daftar + wizard + unduh/pasang PHP dari aplikasi
+- [x] **Fase 3** — Runtime integration: deteksi runtime, terminal PTY, script runner, unduh Caddy/Bun → [hasil](docs/fase-3.md)
 - [ ] **Fase 4** — Polish & distribusi: tray, auto-update, installer, SSL trust, export config
 - [ ] **Fase 5 (v2)** — Pluggable backend: Apache sebagai opsi via Caddy reverse proxy
 
@@ -275,17 +275,19 @@ Deliverable:
 
 Selesai bila: user bisa membuat site Laravel baru dari nol dan membukanya di browser tanpa menyentuh config.
 
-### Fase 3 — Runtime integration
+### Fase 3 — Runtime integration ✅
 
 Deliverable:
 - `RuntimeDetector`: `where bun`, `where node`, `where php`; catat sumber (system/bundled) ke config.
-- Fallback berlapis Bun: sistem → folder `engines/bun` → tawaran unduh.
+- Fallback berlapis Bun: sistem → folder `engines/bun` → unduh dari GitHub lewat aplikasi.
 - Terminal panel: shell dengan `PATH` yang sudah diperkaya, `cd` otomatis ke root site aktif.
-- Script runner: tombol untuk `artisan migrate`, `artisan serve`, `composer install`, `bun run dev`.
-- `bun` sebagai default runner TS: `bun <file>.ts` langsung, tanpa config.
-- Indikator runtime di UI: "Bun 1.2.3 (sistem)" vs "(bundled)".
+- Script runner: tombol untuk `artisan migrate`, `artisan serve`, `composer install`, dan skrip `package.json`.
+- `bun` sebagai default runner TS: `bun <file>.ts` langsung dari panel situs.
+- Indikator runtime di UI: "Bun 1.2.3 (sistem)" vs "(bawaan)".
 
 Selesai bila: tidak ada binary ganda saat Bun/Node sudah terpasang, dan TS bisa dijalankan dari UI tanpa langkah setup.
+
+**Terverifikasi:** 64 unit test lulus; unduhan sungguhan untuk PHP 8.3 (SHA-256), Caddy 2.11.7 (SHA-512 dari `checksums.txt`, lalu `caddy version` dijalankan), dan Bun 1.4.4 (`bun --version` dibandingkan dengan tag rilis); pendaftaran `php` ke PATH pengguna diuji naik-turun dengan PATH kembali identik. Detail: [`docs/fase-3.md`](docs/fase-3.md).
 
 ### Fase 4 — Polish & distribusi
 
