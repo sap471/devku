@@ -81,6 +81,21 @@ Error: PHP gagal siap: belum siap setelah 20s (tidak siap sebelum timeout)
 
 Runtime membatalkan seluruh startup, mematikan yang sudah jalan, dan tidak meninggalkan proses.
 
+## Validasi config Caddy
+
+`caddy validate --config <file> --adapter caddyfile` memuat dan menyiapkan config tanpa menjalankannya. Dipakai berbeda tergantung keadaan:
+
+| Keadaan | Alat | Alasan |
+|---|---|---|
+| Belum ada instance hidup | `caddy validate` | Satu pesan galat jelas, tanpa supervisor mencoba 5 kali |
+| Instance sudah hidup | `POST /load` | Sudah memvalidasi sendiri dan atomik: ditolak = config lama tetap jalan |
+
+Terverifikasi: `/load` dengan config rusak mengembalikan `400` beserta pesan, dan situs lama tetap `200`.
+
+**Bug yang ditemukan lewat ini:** kode lama menulis Caddyfile ke disk *sebelum* reload. Config yang ditolak Caddy akan tersimpan, sehingga start berikutnya ikut gagal. Sekarang urutannya: render → validasi → baru tulis (`write_config`), dan pada jalur reload, tulis hanya setelah `/load` menerima.
+
+Yang tidak dicakup `validate`: port bentrok, upstream `php-cgi` mati, dan masalah sertifikat. Itu kegagalan runtime, bukan config.
+
 ## Yang sengaja ditunda
 
 | Item | Pindah ke | Alasan |

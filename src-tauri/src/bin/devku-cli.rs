@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("status") => status(),
         Some("sites") => sites(),
-        Some("check") => check(),
+        Some("check") => check().await,
         Some("install-php") => {
             let zip = args
                 .get(1)
@@ -113,7 +113,7 @@ fn sites() -> Result<()> {
     Ok(())
 }
 
-fn check() -> Result<()> {
+async fn check() -> Result<()> {
     let paths = Paths::resolve();
     let config = Config::load(&paths)?;
     config.validate()?;
@@ -123,8 +123,15 @@ fn check() -> Result<()> {
     let ports: BTreeMap<String, u16> = allocation.into_iter().collect();
 
     let caddy = CaddyBackend::new(paths.clone());
-    print!("{}", caddy.render(&config, &ports)?);
-    eprintln!("\n[devku] caddy terpasang: {}", caddy.is_installed());
+    let caddyfile = caddy.render(&config, &ports)?;
+    print!("{caddyfile}");
+
+    if caddy.is_installed() {
+        caddy.validate(&caddyfile).await?;
+        eprintln!("[devku] config valid");
+    } else {
+        eprintln!("[devku] Caddy belum terpasang; validasi dilewati");
+    }
     Ok(())
 }
 

@@ -118,6 +118,7 @@ PHP-FPM tidak tersedia untuk Windows. Yang dipakai `php-cgi.exe -b 127.0.0.1:POR
 | Runner JS/TS | Bun (sistem → bundel → download) | Lihat §7 |
 | Supervisor proses | `process-wrap` 10 + tokio | Job Object di Windows / process group di Unix, tanpa proses tambahan |
 | Klien admin API | HTTP manual di `TcpStream` | Loopback saja; hemat ~1.5 MB dibanding `reqwest` |
+| Validasi config | `caddy validate` saat start, `/load` saat hidup | Satu pesan galat jelas; file tidak pernah berisi config yang ditolak |
 | Auto-update | Tauri updater + signature | Distribusi tanpa installer ulang |
 | Package manager | **Bun** (fallback Node/npm) | Lihat §4.1 |
 

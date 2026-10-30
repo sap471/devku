@@ -49,8 +49,7 @@ impl Runtime {
         }
 
         let backend = CaddyBackend::new(paths.clone());
-        let caddyfile = backend.render(config, &runtime.ports)?;
-        crate::paths::write_atomic(&paths.caddyfile(), &caddyfile)?;
+        backend.write_config(config, &runtime.ports).await?;
 
         let spec: ServiceSpec = backend.spec(config, &runtime.ports)?;
         let caddy = Supervisor::start(spec, hook)?;

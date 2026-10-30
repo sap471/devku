@@ -54,6 +54,52 @@ impl CaddyBackend {
 
         Ok(target)
     }
+
+    /// Caddy memvalidasi sebelum benar-benar dijalankan. Dipakai saat belum ada
+    /// instance hidup: lebih baik satu pesan galat jelas daripada proses yang
+    /// gagal start lalu diulang supervisor lima kali.
+    pub async fn validate(&self, caddyfile: &str) -> Result<()> {
+        if !self.is_installed() {
+            bail!(
+                "Caddy belum terpasang di {}",
+                self.paths.caddy_binary().display()
+            );
+        }
+
+        std::fs::create_dir_all(self.paths.runtime())?;
+        let candidate = self.paths.runtime().join("Caddyfile.candidate");
+        std::fs::write(&candidate, caddyfile)?;
+
+        let output = tokio::process::Command::new(self.binary())
+            .arg("validate")
+            .arg("--config")
+            .arg(&candidate)
+            .arg("--adapter")
+            .arg("caddyfile")
+            .output()
+            .await
+            .with_context(|| format!("gagal menjalankan {}", self.binary().display()))?;
+
+        let _ = std::fs::remove_file(&candidate);
+
+        if output.status.success() {
+            return Ok(());
+        }
+        bail!("{}", extract_caddy_error(&output.stderr, &output.stdout))
+    }
+
+    /// Render, validasi, baru tulis. Urutan ini mencegah file di disk berisi
+    /// config yang ditolak, yang akan menggagalkan start berikutnya juga.
+    pub async fn write_config(
+        &self,
+        config: &Config,
+        php_ports: &BTreeMap<String, u16>,
+    ) -> Result<String> {
+        let caddyfile = self.render(config, php_ports)?;
+        self.validate(&caddyfile).await?;
+        write_atomic(&self.paths.caddyfile(), &caddyfile)?;
+        Ok(caddyfile)
+    }
 }
 
 #[async_trait]
@@ -142,12 +188,69 @@ impl WebServerBackend for CaddyBackend {
 
     async fn reload(&self, config: &Config, php_ports: &BTreeMap<String, u16>) -> Result<u16> {
         let caddyfile = self.render(config, php_ports)?;
+
+        // Instance yang hidup sudah memvalidasi sendiri saat /load: kalau
+        // ditolak, config lama tetap berjalan. Jadi tidak perlu `caddy validate`
+        // terpisah di jalur ini, cukup jangan simpan file yang ditolak.
+        let (status, body) = api::post_caddyfile(&caddyfile).await?;
+        if status >= 400 {
+            bail!("Caddy menolak config: {}", extract_load_error(&body));
+        }
+
         write_atomic(&self.paths.caddyfile(), &caddyfile)?;
-        api::post_caddyfile(&caddyfile).await
+        Ok(status)
     }
 
     async fn healthy(&self) -> bool {
         api::ping().await
+    }
+}
+
+/// Caddy menulis log JSON ke stderr; ambil hanya baris level error supaya UI
+/// tidak menampilkan deretan info startup.
+fn extract_caddy_error(stderr: &[u8], stdout: &[u8]) -> String {
+    let mut messages = Vec::new();
+
+    for line in String::from_utf8_lossy(stderr).lines() {
+        let line = line.trim();
+        if !line.starts_with('{') {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+            && value.get("level").and_then(|v| v.as_str()) == Some("error")
+            && let Some(msg) = value.get("msg").and_then(|v| v.as_str())
+        {
+            messages.push(msg.to_string());
+        }
+    }
+
+    if !messages.is_empty() {
+        return messages.join("; ");
+    }
+
+    let out = String::from_utf8_lossy(stdout).trim().to_string();
+    if !out.is_empty() {
+        return out;
+    }
+    let err = String::from_utf8_lossy(stderr).trim().to_string();
+    if err.is_empty() {
+        "Caddy menolak config tanpa pesan".to_string()
+    } else {
+        err
+    }
+}
+
+fn extract_load_error(body: &str) -> String {
+    let trimmed = body.trim();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed)
+        && let Some(err) = value.get("error").and_then(|v| v.as_str())
+    {
+        return err.to_string();
+    }
+    if trimmed.is_empty() {
+        "tanpa pesan".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -259,5 +362,60 @@ mod tests {
         let text = caddy.render(&config, &BTreeMap::new()).unwrap();
         assert!(text.contains("admin localhost:2019"));
         assert!(!text.contains("php_fastcgi"));
+    }
+
+    #[test]
+    fn picks_only_error_lines_from_caddy_log() {
+        let stderr = br#"{"level":"info","msg":"using config from file"}
+{"level":"error","msg":"unrecognized directive: nope"}
+{"level":"info","msg":"done"}"#;
+
+        let message = extract_caddy_error(stderr, b"");
+        assert_eq!(message, "unrecognized directive: nope");
+    }
+
+    #[test]
+    fn falls_back_to_plain_output() {
+        let message = extract_caddy_error(b"", b"Valid configuration\n");
+        assert_eq!(message, "Valid configuration");
+    }
+
+    #[test]
+    fn parses_load_error_body() {
+        let body = r#"{"error":"Caddyfile:8: unrecognized directive: nope"}"#;
+        assert_eq!(
+            extract_load_error(body),
+            "Caddyfile:8: unrecognized directive: nope"
+        );
+        assert_eq!(extract_load_error(""), "tanpa pesan");
+    }
+
+    /// Butuh binary Caddy nyata. Jalankan dengan:
+    /// `$env:DEVKU_CADDY_BIN="...caddy.exe"; cargo test --lib -- --ignored`
+    #[tokio::test]
+    #[ignore = "butuh binary Caddy lewat DEVKU_CADDY_BIN"]
+    async fn validate_accepts_good_and_rejects_bad() {
+        let bin = std::env::var("DEVKU_CADDY_BIN").expect("set DEVKU_CADDY_BIN");
+        let root = std::env::temp_dir().join(format!("devku-validate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+        let backend = CaddyBackend::new(paths);
+        std::fs::create_dir_all(backend.binary().parent().unwrap()).unwrap();
+        std::fs::copy(&bin, backend.binary()).unwrap();
+
+        let good = "{\n\tadmin localhost:2019\n\tauto_https off\n}\n\n\
+                    http://x.localhost:8099 {\n\trespond \"ok\"\n}\n";
+        backend.validate(good).await.unwrap();
+
+        let bad = format!("{good}\nhttp://y.localhost:8099 {{\n\tnope_directive z\n}}\n");
+        let message = backend.validate(&bad).await.unwrap_err().to_string();
+        assert!(
+            message.contains("unrecognized directive"),
+            "pesan: {message}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
