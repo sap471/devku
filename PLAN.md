@@ -6,7 +6,7 @@ Development environment untuk PHP di Windows: ringan, multi-PHP per domain, teri
 
 - [x] **Fase 0** — Fondasi: keputusan arsitektur, scaffold repo, spike teknis → [hasil](docs/spike-fase-0.md)
 - [x] **Fase 1** — Core services: Caddy manager, php-cgi pool + supervisor, port allocator → [hasil](docs/fase-1.md)
-- [ ] **Fase 2** — Project manager: CRUD site, downloader PHP, auto vhost, autodetect framework
+- [ ] **Fase 2** - Project manager: UI daftar + wizard selesai; unduh PHP dari internet belum
 - [ ] **Fase 3** — Runtime integration: deteksi Bun/Node/PHP sistem, terminal, script runner
 - [ ] **Fase 4** — Polish & distribusi: tray, auto-update, installer, SSL trust, export config
 - [ ] **Fase 5 (v2)** — Pluggable backend: Apache sebagai opsi via Caddy reverse proxy

@@ -8,7 +8,25 @@ use crate::detect;
 use crate::session::{Session, SiteDraft, Snapshot};
 
 pub struct AppState {
-    pub session: Mutex<Session>,
+    /// None berarti config gagal dibaca. UI harus menampilkan galat, bukan
+    /// crash, dan tidak boleh menulis apa pun sampai user memperbaikinya.
+    pub session: Mutex<Option<Session>>,
+    pub boot_error: Option<String>,
+}
+
+impl AppState {
+    pub fn new(session: Result<Session, anyhow::Error>) -> Self {
+        match session {
+            Ok(session) => Self {
+                session: Mutex::new(Some(session)),
+                boot_error: None,
+            },
+            Err(err) => Self {
+                session: Mutex::new(None),
+                boot_error: Some(format!("{err:#}")),
+            },
+        }
+    }
 }
 
 /// anyhow kehilangan rantai konteks saat di-Display biasa; `{:#}` menampilkan
@@ -17,36 +35,57 @@ fn error(err: anyhow::Error) -> String {
     format!("{err:#}")
 }
 
+fn unavailable(boot_error: &Option<String>) -> String {
+    boot_error
+        .clone()
+        .unwrap_or_else(|| "konfigurasi belum siap".to_string())
+}
+
 #[tauri::command]
 pub async fn snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
-    let session = state.session.lock().await;
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
     Ok(session.snapshot().await)
 }
 
 #[tauri::command]
 pub async fn start(state: State<'_, AppState>) -> Result<Snapshot, String> {
-    let mut session = state.session.lock().await;
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
     session.start().await.map_err(error)?;
     Ok(session.snapshot().await)
 }
 
 #[tauri::command]
 pub async fn stop(state: State<'_, AppState>) -> Result<Snapshot, String> {
-    let mut session = state.session.lock().await;
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
     session.stop().await;
     Ok(session.snapshot().await)
 }
 
 #[tauri::command]
 pub async fn add_site(state: State<'_, AppState>, draft: SiteDraft) -> Result<Snapshot, String> {
-    let mut session = state.session.lock().await;
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
     session.add_site(draft).await.map_err(error)?;
     Ok(session.snapshot().await)
 }
 
 #[tauri::command]
 pub async fn remove_site(state: State<'_, AppState>, id: String) -> Result<Snapshot, String> {
-    let mut session = state.session.lock().await;
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
     session.remove_site(&id).await.map_err(error)?;
     Ok(session.snapshot().await)
 }
@@ -57,7 +96,10 @@ pub async fn set_site_enabled(
     id: String,
     enabled: bool,
 ) -> Result<Snapshot, String> {
-    let mut session = state.session.lock().await;
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
     session.set_enabled(&id, enabled).await.map_err(error)?;
     Ok(session.snapshot().await)
 }
@@ -86,6 +128,9 @@ pub async fn tail_log(
     name: String,
     lines: Option<usize>,
 ) -> Result<Vec<String>, String> {
-    let session = state.session.lock().await;
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
     session.tail_log(&name, lines.unwrap_or(200)).map_err(error)
 }
