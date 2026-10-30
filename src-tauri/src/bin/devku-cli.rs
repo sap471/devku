@@ -205,7 +205,7 @@ async fn up(args: &[String]) -> Result<()> {
     let runtime = Runtime::start(&config, paths.clone(), Some(hook)).await?;
 
     for site in config.served_sites() {
-        let port = runtime.ports.get(&site.php).copied().unwrap_or(0);
+        let port = runtime.port_of(&site.php).unwrap_or(0);
         println!(
             "ready  http://{}  php={}  fpm=127.0.0.1:{}",
             site.domain, site.php, port

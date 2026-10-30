@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,9 +16,9 @@ pub const PHP_PORT_START: u16 = 9001;
 /// Sekumpulan proses yang sedang melayani config tertentu. Drop = matikan semua,
 /// jadi tidak ada jalur di mana php-cgi tertinggal hidup.
 pub struct Runtime {
-    pub ports: BTreeMap<String, u16>,
-    php: Vec<Supervisor>,
-    caddy: Supervisor,
+    ports: BTreeMap<String, u16>,
+    php: Vec<(String, Supervisor)>,
+    caddy: Option<Supervisor>,
 }
 
 pub type Hook = Arc<dyn Fn(&str, &ServiceState) + Send + Sync>;
@@ -28,9 +28,6 @@ impl Runtime {
         paths.ensure()?;
         config.validate()?;
 
-        let manager = PhpManager::new(paths.clone());
-        let backend = CaddyBackend::new(paths.clone());
-
         let versions = config.php_versions_in_use();
         if versions.is_empty() {
             anyhow::bail!("tidak ada site aktif; tidak ada yang perlu dijalankan");
@@ -39,67 +36,124 @@ impl Runtime {
         let allocation = ports::allocate(&versions, PHP_PORT_START)?;
         let port_map: BTreeMap<String, u16> = allocation.into_iter().collect();
 
-        let mut php = Vec::new();
-        for (version, port) in &port_map {
-            let spec = manager
-                .spec(version, *port, config.php.children)
-                .with_context(|| format!("menyiapkan PHP {version}"))?;
-            tracing_note(&format!("php {version} -> 127.0.0.1:{port}"));
-            php.push(Supervisor::start(spec, hook.clone())?);
+        let mut runtime = Self {
+            ports: BTreeMap::new(),
+            php: Vec::new(),
+            caddy: None,
+        };
+
+        for version in port_map.keys() {
+            runtime
+                .ensure_version(version, config.php.children, &paths, hook.clone())
+                .await?;
         }
 
-        for supervisor in &php {
-            if let Err(reason) = supervisor.wait_ready(Duration::from_secs(20)).await {
-                shutdown_all(php).await;
-                anyhow::bail!("PHP gagal siap: {reason}");
-            }
-        }
-
-        let caddyfile = backend.render(config, &port_map)?;
+        let backend = CaddyBackend::new(paths.clone());
+        let caddyfile = backend.render(config, &runtime.ports)?;
         crate::paths::write_atomic(&paths.caddyfile(), &caddyfile)?;
 
-        let spec: ServiceSpec = backend.spec(config, &port_map)?;
+        let spec: ServiceSpec = backend.spec(config, &runtime.ports)?;
         let caddy = Supervisor::start(spec, hook)?;
         if let Err(reason) = caddy.wait_ready(Duration::from_secs(20)).await {
-            shutdown_all(php).await;
+            runtime.shutdown_php().await;
             anyhow::bail!("Caddy gagal siap: {reason}");
         }
+        runtime.caddy = Some(caddy);
 
-        Ok(Self {
-            ports: port_map,
-            php,
-            caddy,
-        })
+        Ok(runtime)
     }
 
-    /// Reload config tanpa mematikan apa pun. Dipakai setelah site ditambah,
-    /// diubah, atau dimatikan.
+    /// Menyalakan pool untuk satu versi kalau belum ada. Dipakai saat site baru
+    /// memakai versi PHP yang belum berjalan; versi lain tidak terganggu.
+    pub async fn ensure_version(
+        &mut self,
+        version: &str,
+        children: u16,
+        paths: &Paths,
+        hook: Option<Hook>,
+    ) -> Result<u16> {
+        if let Some(port) = self.ports.get(version) {
+            return Ok(*port);
+        }
+
+        let taken: BTreeSet<u16> = self.ports.values().copied().collect();
+        let port = ports::first_free(PHP_PORT_START, &taken)?;
+
+        let manager = PhpManager::new(paths.clone());
+        let spec = manager
+            .spec(version, port, children)
+            .with_context(|| format!("menyiapkan PHP {version}"))?;
+
+        let supervisor = Supervisor::start(spec, hook)?;
+        if let Err(reason) = supervisor.wait_ready(Duration::from_secs(20)).await {
+            supervisor.shutdown().await;
+            anyhow::bail!("PHP {version} gagal siap: {reason}");
+        }
+
+        self.ports.insert(version.to_string(), port);
+        self.php.push((version.to_string(), supervisor));
+        Ok(port)
+    }
+
+    /// Hentikan pool yang tidak lagi dipakai site mana pun.
+    pub async fn stop_unused(&mut self, in_use: &BTreeSet<String>) -> Result<()> {
+        let mut keep = Vec::new();
+        let mut stop = Vec::new();
+
+        for (version, supervisor) in self.php.drain(..) {
+            if in_use.contains(&version) {
+                keep.push((version, supervisor));
+            } else {
+                stop.push((version, supervisor));
+            }
+        }
+        self.php = keep;
+
+        for (version, supervisor) in stop {
+            supervisor.shutdown().await;
+            self.ports.remove(&version);
+        }
+        Ok(())
+    }
+
+    /// Reload config tanpa mematikan apa pun.
     pub async fn reload(&self, config: &Config, paths: Paths) -> Result<u16> {
         let backend = CaddyBackend::new(paths);
         backend.reload(config, &self.ports).await
     }
 
+    pub fn ports(&self) -> &BTreeMap<String, u16> {
+        &self.ports
+    }
+
+    pub fn port_of(&self, version: &str) -> Option<u16> {
+        self.ports.get(version).copied()
+    }
+
     pub async fn states(&self) -> Vec<(String, ServiceState)> {
-        let mut out = vec![("caddy".to_string(), self.caddy.state().await)];
-        for supervisor in &self.php {
-            out.push((supervisor.name.clone(), supervisor.state().await));
+        let mut out = Vec::new();
+        if let Some(caddy) = &self.caddy {
+            out.push(("caddy".to_string(), caddy.state().await));
+        }
+        for (version, supervisor) in &self.php {
+            out.push((format!("php-{version}"), supervisor.state().await));
         }
         out
     }
 
     pub async fn shutdown(self) {
-        let Self { php, caddy, .. } = self;
-        caddy.shutdown().await;
-        shutdown_all(php).await;
+        let Self { caddy, php, .. } = self;
+        if let Some(caddy) = caddy {
+            caddy.shutdown().await;
+        }
+        for (_, supervisor) in php {
+            supervisor.shutdown().await;
+        }
     }
-}
 
-async fn shutdown_all(supervisors: Vec<Supervisor>) {
-    for supervisor in supervisors {
-        supervisor.shutdown().await;
+    async fn shutdown_php(&mut self) {
+        for (_, supervisor) in self.php.drain(..) {
+            supervisor.shutdown().await;
+        }
     }
-}
-
-fn tracing_note(message: &str) {
-    eprintln!("[devku] {message}");
 }

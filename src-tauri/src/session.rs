@@ -1,0 +1,371 @@
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+
+use crate::config::{Config, Site};
+use crate::detect;
+use crate::paths::Paths;
+use crate::proc::ServiceState;
+use crate::runtime::{Hook, Runtime};
+
+/// Permintaan tambah site dari UI. Semua opsional kecuali folder, karena
+/// pemindaian folder sudah bisa mengisi sisanya.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SiteDraft {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub php: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub framework: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SiteView {
+    pub id: String,
+    pub name: String,
+    pub domain: String,
+    pub php: String,
+    pub framework: String,
+    pub enabled: bool,
+    pub path: String,
+    pub port: Option<u16>,
+    pub status: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ServiceView {
+    pub name: String,
+    pub status: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Snapshot {
+    pub tld: String,
+    pub running: bool,
+    pub caddy_installed: bool,
+    pub installed_php: Vec<String>,
+    pub sites: Vec<SiteView>,
+    pub services: Vec<ServiceView>,
+}
+
+/// Pemilik state aplikasi: config di disk + runtime yang mungkin hidup.
+/// Semua perintah UI lewat sini, jadi tidak ada jalur yang menyentuh
+/// supervisor secara langsung.
+pub struct Session {
+    paths: Paths,
+    config: Config,
+    runtime: Option<Runtime>,
+    hook: Option<Hook>,
+}
+
+impl Session {
+    pub fn new(paths: Paths, hook: Option<Hook>) -> Result<Self> {
+        paths.ensure()?;
+        let config = Config::load(&paths)?;
+        Ok(Self {
+            paths,
+            config,
+            runtime: None,
+            hook,
+        })
+    }
+
+    pub fn paths(&self) -> &Paths {
+        &self.paths
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.runtime.is_some()
+    }
+
+    pub async fn snapshot(&self) -> Snapshot {
+        let mut services = Vec::new();
+        let mut ports = std::collections::BTreeMap::new();
+        let mut php_status: Vec<(String, ServiceState)> = Vec::new();
+
+        if let Some(runtime) = &self.runtime {
+            for (name, state) in runtime.states().await {
+                if let Some(version) = name.strip_prefix("php-") {
+                    php_status.push((version.to_string(), state));
+                } else {
+                    services.push(ServiceView {
+                        name,
+                        status: state.tag().to_string(),
+                        detail: state.detail(),
+                    });
+                }
+            }
+            ports = runtime.ports().clone();
+        }
+
+        for (version, state) in &php_status {
+            services.push(ServiceView {
+                name: format!("php-{version}"),
+                status: state.tag().to_string(),
+                detail: state.detail(),
+            });
+        }
+
+        let sites = self
+            .config
+            .sites
+            .iter()
+            .map(|site| {
+                let state = php_status
+                    .iter()
+                    .find(|(version, _)| version == &site.php)
+                    .map(|(_, state)| state.clone());
+
+                let (status, detail) = match (&self.runtime, state) {
+                    (None, _) => ("stopped".to_string(), None),
+                    (Some(_), Some(state)) if site.enabled => {
+                        (state.tag().to_string(), state.detail())
+                    }
+                    (Some(_), _) => ("stopped".to_string(), None),
+                };
+
+                SiteView {
+                    id: site.id.clone(),
+                    name: site.name.clone(),
+                    domain: site.domain.clone(),
+                    php: site.php.clone(),
+                    framework: site.framework.clone().unwrap_or_else(|| "php".to_string()),
+                    enabled: site.enabled,
+                    path: site.path.to_string_lossy().to_string(),
+                    port: if site.enabled {
+                        ports.get(&site.php).copied()
+                    } else {
+                        None
+                    },
+                    status,
+                    detail,
+                }
+            })
+            .collect();
+
+        Snapshot {
+            tld: self.config.tld.clone(),
+            running: self.runtime.is_some(),
+            caddy_installed: crate::caddy::CaddyBackend::new(self.paths.clone()).is_installed(),
+            installed_php: crate::php::PhpManager::new(self.paths.clone()).installed(),
+            sites,
+            services,
+        }
+    }
+
+    pub async fn start(&mut self) -> Result<()> {
+        if self.runtime.is_some() {
+            return Ok(());
+        }
+        let runtime = Runtime::start(&self.config, self.paths.clone(), self.hook.clone()).await?;
+        self.runtime = Some(runtime);
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown().await;
+        }
+    }
+
+    pub async fn add_site(&mut self, draft: SiteDraft) -> Result<Site> {
+        if !draft.path.exists() {
+            bail!("folder {} tidak ada", draft.path.display());
+        }
+
+        let found = detect::detect(&draft.path).with_context(|| {
+            format!(
+                "tidak menemukan tanda project PHP di {}. Pilih folder yang berisi index.php, artisan, atau spark.",
+                draft.path.display()
+            )
+        })?;
+
+        let framework = draft
+            .framework
+            .clone()
+            .unwrap_or_else(|| found.framework.to_string());
+
+        let id = match draft.id.clone() {
+            Some(id) if !id.trim().is_empty() => slug(&id),
+            _ => self.unique_id(&slug(&folder_name(&draft.path))),
+        };
+
+        let name = draft
+            .name
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| folder_name(&draft.path));
+
+        let domain = draft
+            .domain
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("{id}.{}", self.config.tld));
+
+        let php = match draft.php.clone().filter(|value| !value.is_empty()) {
+            Some(php) => php,
+            None => self.default_php()?,
+        };
+
+        if self.config.sites.iter().any(|site| site.domain == domain) {
+            bail!("domain {domain} sudah dipakai site lain");
+        }
+
+        let site = Site {
+            id,
+            name,
+            path: found.document_root,
+            domain,
+            php,
+            framework: Some(framework),
+            backend: None,
+            enabled: true,
+        };
+
+        self.config.sites.push(site.clone());
+        self.config.save(&self.paths)?;
+        self.refresh().await?;
+        Ok(site)
+    }
+
+    pub async fn remove_site(&mut self, id: &str) -> Result<()> {
+        let before = self.config.sites.len();
+        self.config.sites.retain(|site| site.id != id);
+        if self.config.sites.len() == before {
+            bail!("site {id} tidak ditemukan");
+        }
+        self.config.save(&self.paths)?;
+        self.refresh().await
+    }
+
+    pub async fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<()> {
+        let site = self
+            .config
+            .sites
+            .iter_mut()
+            .find(|site| site.id == id)
+            .with_context(|| format!("site {id} tidak ditemukan"))?;
+        site.enabled = enabled;
+        self.config.save(&self.paths)?;
+        self.refresh().await
+    }
+
+    /// Setelah config berubah: nyalakan versi PHP yang baru dipakai, matikan
+    /// yang tidak lagi dipakai, lalu reload Caddy. Kalau runtime mati, cukup
+    /// simpan config.
+    async fn refresh(&mut self) -> Result<()> {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return Ok(());
+        };
+
+        let versions = self.config.php_versions_in_use();
+        let children = self.config.php.children;
+
+        for version in &versions {
+            runtime
+                .ensure_version(version, children, &self.paths, self.hook.clone())
+                .await?;
+        }
+
+        let in_use: BTreeSet<String> = versions.into_iter().collect();
+        runtime.stop_unused(&in_use).await?;
+        runtime.reload(&self.config, self.paths.clone()).await?;
+        Ok(())
+    }
+
+    pub fn tail_log(&self, name: &str, lines: usize) -> Result<Vec<String>> {
+        let path = self.paths.logs().join(format!("{name}.log"));
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let raw = std::fs::read_to_string(&path)
+            .with_context(|| format!("gagal membaca {}", path.display()))?;
+        let all: Vec<&str> = raw.lines().collect();
+        let start = all.len().saturating_sub(lines);
+        Ok(all[start..].iter().map(|line| line.to_string()).collect())
+    }
+
+    fn default_php(&self) -> Result<String> {
+        let installed = crate::php::PhpManager::new(self.paths.clone()).installed();
+        if installed.is_empty() {
+            bail!("belum ada PHP terpasang; pasang satu versi dulu");
+        }
+        if !self.config.php.active.is_empty() && installed.contains(&self.config.php.active) {
+            return Ok(self.config.php.active.clone());
+        }
+        Ok(installed[installed.len() - 1].clone())
+    }
+
+    fn unique_id(&self, base: &str) -> String {
+        if !self.config.sites.iter().any(|site| site.id == base) {
+            return base.to_string();
+        }
+        for n in 2..1000 {
+            let candidate = format!("{base}-{n}");
+            if !self.config.sites.iter().any(|site| site.id == candidate) {
+                return candidate;
+            }
+        }
+        format!("{base}-{}", self.config.sites.len() + 1)
+    }
+}
+
+fn folder_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("site")
+        .to_string()
+}
+
+/// Id dipakai sebagai nama file log dan bagian domain, jadi dibatasi ke huruf,
+/// angka, dan tanda hubung.
+pub fn slug(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+
+    for ch in input.chars().flat_map(|ch| ch.to_lowercase()) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "site".to_string()
+    } else {
+        trimmed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slug_cleans_folder_names() {
+        assert_eq!(slug("App A"), "app-a");
+        assert_eq!(slug("my_project"), "my-project");
+        assert_eq!(slug("--My Project!!"), "my-project");
+        assert_eq!(slug("sudah-ok"), "sudah-ok");
+        assert_eq!(slug("!!!"), "site");
+    }
+}

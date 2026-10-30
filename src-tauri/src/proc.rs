@@ -35,6 +35,29 @@ pub enum ServiceState {
     Stopped,
 }
 
+impl ServiceState {
+    /// Label stabil untuk UI; jangan ikut berubah saat pesan diubah.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            ServiceState::Starting => "starting",
+            ServiceState::Ready { .. } => "ready",
+            ServiceState::Backoff { .. } => "backoff",
+            ServiceState::Failed { .. } => "failed",
+            ServiceState::Stopped => "stopped",
+        }
+    }
+
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            ServiceState::Ready { pid } => pid.map(|pid| format!("pid {pid}")),
+            ServiceState::Backoff { reason, .. } | ServiceState::Failed { reason } => {
+                Some(reason.clone())
+            }
+            _ => None,
+        }
+    }
+}
+
 impl std::fmt::Display for ServiceState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
