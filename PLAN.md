@@ -5,7 +5,7 @@ Development environment untuk PHP di Windows: ringan, multi-PHP per domain, teri
 ## Steps
 
 - [x] **Fase 0** — Fondasi: keputusan arsitektur, scaffold repo, spike teknis → [hasil](docs/spike-fase-0.md)
-- [ ] **Fase 1** — Core services: Caddy manager, php-cgi pool, hosts writer, port allocator
+- [x] **Fase 1** — Core services: Caddy manager, php-cgi pool + supervisor, port allocator → [hasil](docs/fase-1.md)
 - [ ] **Fase 2** — Project manager: CRUD site, downloader PHP, auto vhost, autodetect framework
 - [ ] **Fase 3** — Runtime integration: deteksi Bun/Node/PHP sistem, terminal, script runner
 - [ ] **Fase 4** — Polish & distribusi: tray, auto-update, installer, SSL trust, export config
@@ -116,7 +116,8 @@ PHP-FPM tidak tersedia untuk Windows. Yang dipakai `php-cgi.exe -b 127.0.0.1:POR
 | TLD default | `localhost` | Resolve otomatis di Windows 11, tanpa hosts & UAC |
 | Hosts editing | Hanya untuk TLD custom | Fallback opsional, bukan jalur utama |
 | Runner JS/TS | Bun (sistem → bundel → download) | Lihat §7 |
-| Hosts editing | Win32 API + UAC | Perlu elevasi; minta sekali lalu simpan hasil |
+| Supervisor proses | `process-wrap` 10 + tokio | Job Object di Windows / process group di Unix, tanpa proses tambahan |
+| Klien admin API | HTTP manual di `TcpStream` | Loopback saja; hemat ~1.5 MB dibanding `reqwest` |
 | Auto-update | Tauri updater + signature | Distribusi tanpa installer ulang |
 | Package manager | **Bun** (fallback Node/npm) | Lihat §4.1 |
 
@@ -135,6 +136,21 @@ DevKu sendiri dikembangkan dengan **Bun** sebagai package manager frontend/tooli
 **Aturan fallback:** Bun adalah default, bukan preferensi. `npm` hanya dipakai bila Bun benar-benar gagal — resolver tidak menyelesaikan versi, postinstall butuh npm, atau paket native tidak mendukung Bun. Setiap fallback harus disebutkan alasannya, tidak diam-diam.
 
 Catatan: ini package manager untuk *mengembangkan* DevKu. Bun yang dibundel/dideteksi di §7 adalah fitur produk — dua hal berbeda.
+
+### 4.2 Supervisor proses
+
+Tidak ada supervisor eksternal. `php-cgi` dan `caddy` diawasi oleh loop di dalam binary DevKu sendiri, karena setiap alternatif (pm2, process-compose, supervisord, nssm) menambah proses, binary, dan file config yang membuat installer membengkak serta state service lepas dari UI.
+
+| Kebutuhan | Implementasi |
+|---|---|
+| Proses group | `process-wrap` — `JobObject` di Windows, `ProcessGroup::leader()` di Unix |
+| Anti-yatim | Job Object dengan kill-on-close + `KillOnDrop` |
+| Readiness | TCP connect ke port, bukan cek PID |
+| Restart | Backoff 200ms → 400 → 800 … mentok 5s |
+| Crash-loop | > 5 restart dalam 60 detik → `Failed`, berhenti mencoba |
+| State ke UI | Callback `(nama, ServiceState)` — nanti diteruskan sebagai Tauri event |
+
+Batasan yang disadari: backend Apache (Fase 5) **tidak** memakai supervisor ini untuk PHP — `mod_fcgid` sudah melakukannya. Supervisor di sana hanya mengawasi `httpd.exe`.
 
 ### Format config global
 
@@ -229,18 +245,22 @@ Deliverable:
 
 Hasil lengkap: [`docs/spike-fase-0.md`](docs/spike-fase-0.md).
 
-### Fase 1 — Core services
+### Fase 1 — Core services ✅
 
 Deliverable:
-- `WebServerBackend` trait: `add_site`, `remove_site`, `reload`, `status`, `start`, `stop`.
-- `CaddyBackend`: generator Caddyfile + kontrol admin API + manajemen proses.
-- `PhpManager`: unduh ekstrak PHP zip, daftar versi, spawn `php-cgi` per versi dengan `PHP_FCGI_CHILDREN`, health check.
-- `PhpSupervisor`: pantau PID induk `php-cgi`; restart saat exit, backoff bertingkat, catat alasan exit. Ini penjaga pool.
-- `HostsManager`: baca/tulis hosts dengan penanda blok `# devku:begin` / `# devku:end` agar bersih saat uninstall. **Hanya dipakai bila TLD ≠ `localhost`.**
-- `PortAllocator`: cari port bebas mulai 9001, hindari bentrok.
-- Log viewer minimal (tail file).
+- [x] `WebServerBackend` trait — `render`, `spec`, `reload`, `healthy`. Core tidak tahu backend mana yang aktif.
+- [x] `CaddyBackend`: generator Caddyfile per site + reload lewat admin API (`POST /load`) + manajemen proses.
+- [x] `PhpManager`: ekstrak zip PHP, daftar versi, bootstrap `php.ini`, spec `php-cgi -b` dengan `PHP_FCGI_CHILDREN`.
+- [x] `PhpSupervisor` (generik di `proc.rs`): pantau proses, restart + backoff, crash-loop breaker, readiness via TCP.
+- [x] `HostsManager`: blok bertanda `# devku:begin` / `# devku:end`. **Hanya dipakai bila TLD ≠ `localhost`.**
+- [x] `PortAllocator`: port bebas mulai 9001, deterministik per versi.
+- [x] CLI internal `devku-cli` — `up`, `status`, `sites`, `check`, `install-php`, `install-caddy`, `add-site`.
 
 Selesai bila: bisa menyalakan Caddy + 2 versi PHP dari CLI internal, dan `curl http://app-a.localhost` mengembalikan response PHP yang benar.
+
+**Terverifikasi:** 18 unit test lulus, dua situs dengan PHP 8.3.36 & 7.4.33 di port 80 tanpa hosts/admin, induk `php-cgi` dibunuh → pulih otomatis, `up` berhenti → 0 proses tersisa. Detail: [`docs/fase-1.md`](docs/fase-1.md).
+
+`Log viewer` digeser ke Fase 2 karena butuh UI; log sudah ditulis per service ke `runtime/logs/`.
 
 ### Fase 2 — Project manager
 
