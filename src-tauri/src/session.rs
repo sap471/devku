@@ -36,6 +36,8 @@ pub struct SiteView {
     pub framework: String,
     pub enabled: bool,
     pub path: String,
+    /// Akar project, dipakai terminal. Untuk Laravel beda dengan `path`.
+    pub root: String,
     pub port: Option<u16>,
     pub status: String,
     pub detail: Option<String>,
@@ -54,6 +56,9 @@ pub struct Snapshot {
     pub running: bool,
     pub caddy_installed: bool,
     pub installed_php: Vec<String>,
+    /// Versi yang dipakai untuk situs baru dan untuk shim `php` di PATH.
+    pub default_php: String,
+    pub php_path: crate::path_env::PathStatus,
     pub sites: Vec<SiteView>,
     pub services: Vec<ServiceView>,
 }
@@ -146,6 +151,12 @@ impl Session {
                     framework: site.framework.clone().unwrap_or_else(|| "php".to_string()),
                     enabled: site.enabled,
                     path: site.path.to_string_lossy().to_string(),
+                    root: site
+                        .root
+                        .clone()
+                        .unwrap_or_else(|| site.path.clone())
+                        .to_string_lossy()
+                        .to_string(),
                     port: if site.enabled {
                         ports.get(&site.php).copied()
                     } else {
@@ -162,6 +173,8 @@ impl Session {
             running: self.runtime.is_some(),
             caddy_installed: crate::caddy::CaddyBackend::new(self.paths.clone()).is_installed(),
             installed_php: crate::php::PhpManager::new(self.paths.clone()).installed(),
+            default_php: self.default_php().unwrap_or_default(),
+            php_path: crate::path_env::status(&self.paths),
             sites,
             services,
         }
@@ -240,6 +253,12 @@ impl Session {
             path: document_root,
             domain,
             php,
+            root: Some(
+                found
+                    .as_ref()
+                    .map(|project| project.project_root.clone())
+                    .unwrap_or_else(|| draft.path.clone()),
+            ),
             framework: Some(framework),
             backend: None,
             enabled: true,
@@ -271,6 +290,42 @@ impl Session {
         site.enabled = enabled;
         self.config.save(&self.paths)?;
         self.refresh().await
+    }
+
+    /// Mengganti versi PHP satu situs. Kalau runtime hidup, pool versi baru
+    /// dinyalakan dan yang lama dimatikan lewat `refresh`.
+    pub async fn set_php(&mut self, id: &str, php: &str) -> Result<()> {
+        let installed = crate::php::PhpManager::new(self.paths.clone()).installed();
+        if !installed.iter().any(|version| version == php) {
+            bail!("PHP {php} belum terpasang");
+        }
+
+        let site = self
+            .config
+            .sites
+            .iter_mut()
+            .find(|site| site.id == id)
+            .with_context(|| format!("site {id} tidak ditemukan"))?;
+        if site.php == php {
+            return Ok(());
+        }
+
+        site.php = php.to_string();
+        self.config.save(&self.paths)?;
+        self.refresh().await
+    }
+
+    /// Versi default untuk situs baru dan untuk shim `php` di PATH.
+    pub fn set_default_php(&mut self, php: &str) -> Result<()> {
+        let installed = crate::php::PhpManager::new(self.paths.clone()).installed();
+        if !installed.iter().any(|version| version == php) {
+            bail!("PHP {php} belum terpasang");
+        }
+
+        self.config.php.active = php.to_string();
+        self.config.save(&self.paths)?;
+        crate::path_env::sync_shim(&self.paths, php)?;
+        Ok(())
     }
 
     /// Setelah config berubah: nyalakan versi PHP yang baru dipakai, matikan
@@ -376,5 +431,46 @@ mod tests {
         assert_eq!(slug("--My Project!!"), "my-project");
         assert_eq!(slug("sudah-ok"), "sudah-ok");
         assert_eq!(slug("!!!"), "site");
+    }
+
+    #[tokio::test]
+    async fn site_php_can_be_switched_and_missing_version_is_rejected() {
+        let root = std::env::temp_dir().join(format!("devku-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+
+        for version in ["7.4.33", "8.3.36"] {
+            let dir = paths.php_dir(version);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("php-cgi.exe"), b"").unwrap();
+        }
+
+        let mut config = Config::default();
+        config.sites.push(Site {
+            id: "app".to_string(),
+            name: "App".to_string(),
+            path: root.join("app"),
+            domain: "app.localhost".to_string(),
+            php: "8.3.36".to_string(),
+            root: Some(root.join("app")),
+            framework: None,
+            backend: None,
+            enabled: true,
+        });
+        config.save(&paths).unwrap();
+
+        let mut session = Session::new(paths.clone(), None).unwrap();
+
+        session.set_php("app", "7.4.33").await.unwrap();
+        assert_eq!(session.config().sites[0].php, "7.4.33");
+
+        let err = session.set_php("app", "5.6.9").await.unwrap_err();
+        assert!(err.to_string().contains("belum terpasang"), "{err}");
+
+        session.set_default_php("7.4.33").unwrap();
+        assert_eq!(session.config().php.active, "7.4.33");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

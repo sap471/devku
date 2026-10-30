@@ -5,6 +5,7 @@ pub mod config;
 pub mod detect;
 pub mod download;
 pub mod hosts;
+pub mod path_env;
 pub mod paths;
 pub mod php;
 pub mod ports;
@@ -58,6 +59,10 @@ pub fn run() {
             commands::php_catalog,
             commands::install_php,
             commands::cancel_download,
+            commands::set_site_php,
+            commands::set_default_php,
+            commands::enable_php_path,
+            commands::disable_php_path,
         ])
         .build(tauri::generate_context!())
         .expect("error while building DevKu");

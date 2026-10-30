@@ -133,16 +133,44 @@ pub async fn runtimes(
 }
 
 #[tauri::command]
-pub fn open_terminal(
+pub async fn open_terminal(
     app: tauri::AppHandle,
+    state: State<'_, AppState>,
     terminals: State<'_, crate::terminal::Terminals>,
     cwd: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<u32, String> {
+    // Shell mewarisi PATH aplikasi, yang dibaca saat DevKu diluncurkan. Tanpa
+    // suntikan ini, `php` yang baru dipasang tidak terlihat di terminal.
+    let path_dirs = php_path_dirs(&state).await;
+
     terminals
-        .open(app, cwd, cols.unwrap_or(80), rows.unwrap_or(24))
+        .open(app, cwd, cols.unwrap_or(80), rows.unwrap_or(24), path_dirs)
         .map_err(error)
+}
+
+async fn php_path_dirs(state: &State<'_, AppState>) -> Vec<PathBuf> {
+    let (paths, active) = {
+        let guard = state.session.lock().await;
+        let Some(session) = guard.as_ref() else {
+            return Vec::new();
+        };
+        (session.paths().clone(), session.config().php.active.clone())
+    };
+
+    let installed = PhpManager::new(paths.clone()).installed();
+    let chosen = if installed.iter().any(|version| version == &active) {
+        active
+    } else {
+        installed.last().cloned().unwrap_or_default()
+    };
+
+    let mut dirs = vec![crate::path_env::bin_dir(&paths)];
+    if !chosen.is_empty() {
+        dirs.push(paths.php_dir(&chosen));
+    }
+    dirs
 }
 
 #[tauri::command]
@@ -287,6 +315,59 @@ async fn install_php_inner(
 #[tauri::command]
 pub fn cancel_download(slot: State<'_, download::Slot>) -> bool {
     slot.cancel()
+}
+
+#[tauri::command]
+pub async fn set_site_php(
+    state: State<'_, AppState>,
+    id: String,
+    php: String,
+) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.set_php(&id, &php).await.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn set_default_php(state: State<'_, AppState>, php: String) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.set_default_php(&php).map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn enable_php_path(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    let version = session.snapshot().await.default_php;
+    if version.is_empty() {
+        return Err("belum ada PHP terpasang".to_string());
+    }
+
+    crate::path_env::register(session.paths(), &version).map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn disable_php_path(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    crate::path_env::unregister(session.paths()).map_err(error)?;
+    Ok(session.snapshot().await)
 }
 
 #[derive(Serialize)]

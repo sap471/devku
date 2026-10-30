@@ -154,6 +154,7 @@ mod tests {
                 path: std::env::temp_dir(),
                 domain: "app.test".to_string(),
                 php: "8.3.36".to_string(),
+                root: None,
                 framework: None,
                 backend: None,
                 enabled: true,

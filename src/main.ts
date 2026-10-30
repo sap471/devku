@@ -14,6 +14,7 @@ interface SiteView {
   framework: string;
   enabled: boolean;
   path: string;
+  root: string;
   port: number | null;
   status: Status;
   detail: string | null;
@@ -24,8 +25,17 @@ interface Snapshot {
   running: boolean;
   caddy_installed: boolean;
   installed_php: string[];
+  default_php: string;
+  php_path: PathStatus;
   sites: SiteView[];
   services: ServiceView[];
+}
+
+interface PathStatus {
+  dir: string;
+  registered: boolean;
+  shim_version: string | null;
+  broken: boolean;
 }
 
 interface ServiceView {
@@ -223,6 +233,128 @@ function renderPhpCatalog(): string {
     .join("");
 
   return `<div class="catalog">${rows}</div>`;
+}
+
+function renderPhpSettings(): string {
+  const installed = snapshot?.installed_php ?? [];
+  const path = snapshot?.php_path;
+
+  const options = installed
+    .map(
+      (version) =>
+        `<option value="${esc(version)}" ${
+          version === snapshot?.default_php ? "selected" : ""
+        }>${esc(version)}</option>`,
+    )
+    .join("");
+
+  const defaultField = options
+    ? `<div class="field">
+        <label class="field-label" for="default-php">PHP default</label>
+        <select class="input" id="default-php" ${busy ? "disabled" : ""}>${options}</select>
+        <p class="hint">Dipakai untuk situs baru dan untuk perintah <code>php</code> di PATH.</p>
+      </div>`
+    : '<p class="hint">Belum ada PHP terpasang. Pasang satu versi di daftar bawah.</p>';
+
+  if (!path) return defaultField;
+
+  const entry = `<code class="path-value">${esc(path.dir)}</code>`;
+
+  if (path.registered) {
+    const target = path.shim_version
+      ? `php → ${esc(path.shim_version)}`
+      : "shim belum dibuat";
+
+    return `${defaultField}
+      <div class="path-row">
+        <span class="tag">di PATH</span>
+        ${entry}
+        <span class="hint">${target}</span>
+        <button class="btn btn-quiet" type="button" data-action="disable-php-path" ${
+          busy ? "disabled" : ""
+        }>Lepas</button>
+      </div>
+      ${
+        path.broken
+          ? '<p class="field-error">Shim menunjuk versi yang sudah tidak terpasang. Pilih PHP default lain untuk memperbaikinya.</p>'
+          : ""
+      }
+      <p class="hint">Terminal yang sudah terbuka perlu dibuka ulang agar PATH baru terbaca.</p>`;
+  }
+
+  return `${defaultField}
+    <div class="path-row">
+      <span class="tag">belum di PATH</span>
+      ${entry}
+      <button class="btn" type="button" data-action="enable-php-path" ${
+        installed.length > 0 && !busy ? "" : "disabled"
+      }>Daftarkan</button>
+    </div>
+    <p class="hint">Menambahkan folder itu ke PATH pengguna, tanpa admin dan bisa dilepas lagi. Perintah <code>php</code> lalu bisa dipakai di terminal mana pun.</p>`;
+}
+
+function bindRuntime(): void {
+  const select = document.getElementById("default-php") as HTMLSelectElement | null;
+  select?.addEventListener("change", () => {
+    if (select.value) void setDefaultPhp(select.value);
+  });
+}
+
+function bindSiteDetail(site: SiteView): void {
+  const select = document.getElementById("site-php") as HTMLSelectElement | null;
+  select?.addEventListener("change", () => {
+    if (select.value && select.value !== site.php) {
+      void setSitePhp(site.id, select.value);
+    }
+  });
+}
+
+async function setSitePhp(id: string, php: string): Promise<void> {
+  busy = "site-php";
+  notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("set_site_php", { id, php });
+    applySnapshot(next);
+  } catch (err) {
+    notice = `Gagal memakai PHP ${php}: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function setDefaultPhp(version: string): Promise<void> {
+  busy = "default-php";
+
+  try {
+    const next = await invoke<Snapshot>("set_default_php", { php: version });
+    applySnapshot(next);
+  } catch (err) {
+    notice = `Gagal mengubah PHP default: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function setPhpPath(enable: boolean): Promise<void> {
+  busy = "php-path";
+  notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>(enable ? "enable_php_path" : "disable_php_path");
+    applySnapshot(next);
+  } catch (err) {
+    notice = enable
+      ? `Gagal mendaftarkan PHP ke PATH: ${String(err)}`
+      : `Gagal melepas PHP dari PATH: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
 }
 
 function stageLabel(job: DownloadProgress): string {
@@ -461,8 +593,23 @@ function renderList(): void {
     return;
   }
 
-  list.innerHTML = snapshot.sites
-    .map((site) => {
+  // Dasbor selalu ada di sini supaya panel runtime bisa dibuka lagi tanpa
+  // reload webview.
+  const dashboard = `
+    <div class="site-row">
+      <span class="rail" aria-hidden="true"></span>
+      <button class="row-main btn-quiet" type="button" data-action="dashboard" aria-current="${
+        selectedId === null
+      }">
+        <span class="row-name">Dasbor</span>
+        <span class="row-meta">runtime, PHP, dan versi tersedia</span>
+      </button>
+    </div>`;
+
+  list.innerHTML =
+    dashboard +
+    snapshot.sites
+      .map((site) => {
       const port = site.port ? `:${site.port}` : "port -";
       const statusWord = STATUS_WORD[site.status];
       const showStatus = site.status !== "ready";
@@ -546,13 +693,42 @@ function renderDetail(): void {
           <h3>PHP</h3>
           <button class="btn" type="button" data-action="refresh-php">Muat ulang</button>
         </div>
+        ${renderPhpSettings()}
         <div id="php-catalog">${renderPhpCatalog()}</div>
       </div>`;
+    bindRuntime();
     void loadPhpCatalog();
     return;
   }
 
   const status = `${STATUS_WORD[site.status]}${site.detail ? ` (${site.detail})` : ""}`;
+
+  const installed = snapshot?.installed_php ?? [];
+  const phpOptions = installed
+    .map(
+      (version) =>
+        `<option value="${esc(version)}" ${version === site.php ? "selected" : ""}>${esc(
+          version,
+        )}</option>`,
+    )
+    .join("");
+  const phpMissing = !installed.includes(site.php);
+
+  const phpField = installed.length
+    ? `<div class="field">
+        <label class="field-label" for="site-php">Versi PHP</label>
+        <select class="input" id="site-php" ${busy ? "disabled" : ""}>
+          ${
+            phpMissing
+              ? `<option value="${esc(site.php)}" selected>${esc(site.php)} (tidak terpasang)</option>`
+              : ""
+          }
+          ${phpOptions}
+        </select>
+        ${phpMissing ? `<p class="field-error">PHP ${esc(site.php)} tidak terpasang. Pilih versi lain.</p>` : ""}
+        <p class="hint">Saat diganti, pool versi baru dinyalakan lalu yang lama dimatikan.</p>
+      </div>`
+    : "";
 
   pane.innerHTML = `
     <div class="detail-head">
@@ -561,12 +737,18 @@ function renderDetail(): void {
     <div class="detail-body">
       <dl class="facts">
         <dt>Domain</dt><dd>${esc(site.domain)}</dd>
-        <dt>PHP</dt><dd>${esc(site.php)}</dd>
         <dt>Framework</dt><dd>${esc(frameworkLabel(site.framework))}</dd>
         <dt>Port</dt><dd>${site.port ? `127.0.0.1:${site.port}` : "-"}</dd>
-        <dt>Folder</dt><dd>${esc(site.path)}</dd>
+        <dt>Folder</dt><dd>${esc(site.root)}</dd>
+        ${
+          site.root !== site.path
+            ? `<dt>Akar web</dt><dd>${esc(site.path)}</dd>`
+            : ""
+        }
         <dt>Status</dt><dd>${esc(status)}</dd>
       </dl>
+
+      ${phpField}
 
       <div class="log-head">
         <h3>Log</h3>
@@ -575,6 +757,7 @@ function renderDetail(): void {
       <pre class="log log-empty" id="log"></pre>
     </div>`;
 
+  bindSiteDetail(site);
   paintLog();
   if (logFor !== site.id) {
     logFor = null;
@@ -976,6 +1159,12 @@ document.addEventListener("click", (event) => {
     case "wizard-submit":
       void wizardSubmit();
       break;
+    case "dashboard":
+      selectedId = null;
+      logFor = null;
+      pendingRemove = null;
+      render();
+      break;
     case "select":
       if (id) {
         selectedId = id;
@@ -1019,6 +1208,12 @@ document.addEventListener("click", (event) => {
     case "cancel-download":
       void invoke("cancel_download");
       break;
+    case "enable-php-path":
+      void setPhpPath(true);
+      break;
+    case "disable-php-path":
+      void setPhpPath(false);
+      break;
     case "start":
       void start();
       break;
@@ -1027,7 +1222,7 @@ document.addEventListener("click", (event) => {
       break;
     case "toggle-terminal": {
       const active = snapshot?.sites.find((site) => site.id === selectedId);
-      terminalPanel.toggle(active?.path ?? null);
+      terminalPanel.toggle(active?.root ?? null);
       break;
     }
     case "stop":

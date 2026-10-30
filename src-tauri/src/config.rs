@@ -21,6 +21,10 @@ pub struct Site {
     pub path: PathBuf,
     pub domain: String,
     pub php: String,
+    /// Akar project, yang belum tentu sama dengan akar web (`public/` untuk
+    /// Laravel). Dipakai terminal dan script runner.
+    #[serde(default)]
+    pub root: Option<PathBuf>,
     #[serde(default)]
     pub framework: Option<String>,
     #[serde(default)]

@@ -36,6 +36,7 @@ async fn main() -> Result<()> {
             install_caddy(source)
         }
         Some("add-site") => add_site(&args),
+        Some("php-path") => php_path(args.get(1).map(String::as_str)),
         Some("up") => up(&args).await,
         Some(other) => {
             help();
@@ -58,9 +59,62 @@ fn help() {
          devku-cli install-php <zip> <versi>\n  \
          devku-cli install-caddy <path>\n  \
          devku-cli add-site <id> <nama> <folder> <versi-php> [domain]\n  \
+         devku-cli php-path [on|off]\n  \
          devku-cli up [--seconds N]\n\n\
          DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
     );
+}
+
+fn php_path(mode: Option<&str>) -> Result<()> {
+    let paths = Paths::resolve();
+    let config = Config::load(&paths)?;
+
+    match mode {
+        Some("on") => {
+            let installed = PhpManager::new(paths.clone()).installed();
+            let version = if installed
+                .iter()
+                .any(|version| version == &config.php.active)
+            {
+                config.php.active.clone()
+            } else {
+                installed
+                    .last()
+                    .cloned()
+                    .context("belum ada PHP terpasang")?
+            };
+            devku_lib::path_env::register(&paths, &version)?;
+            println!(
+                "php {} -> {}",
+                version,
+                devku_lib::path_env::bin_dir(&paths).display()
+            );
+        }
+        Some("off") => {
+            devku_lib::path_env::unregister(&paths)?;
+            println!(
+                "{} dilepas dari PATH pengguna",
+                devku_lib::path_env::bin_dir(&paths).display()
+            );
+        }
+        _ => {
+            let status = devku_lib::path_env::status(&paths);
+            println!("folder     {}", status.dir);
+            println!(
+                "di PATH    {}",
+                if status.registered { "ya" } else { "tidak" }
+            );
+            println!(
+                "shim       {}",
+                status.shim_version.as_deref().unwrap_or("belum dibuat")
+            );
+            if status.broken {
+                println!("catatan    shim menunjuk PHP yang sudah tidak ada");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn status() -> Result<()> {
@@ -178,6 +232,9 @@ fn add_site(args: &[String]) -> Result<()> {
     if !path.exists() {
         bail!("folder {} tidak ada", path.display());
     }
+    let root = devku_lib::detect::detect(&path)
+        .map(|project| project.project_root)
+        .unwrap_or_else(|| path.clone());
 
     config.sites.retain(|site| site.id != *id);
     config.sites.push(Site {
@@ -186,6 +243,7 @@ fn add_site(args: &[String]) -> Result<()> {
         path,
         domain,
         php: php.clone(),
+        root: Some(root),
         framework: None,
         backend: None,
         enabled: true,

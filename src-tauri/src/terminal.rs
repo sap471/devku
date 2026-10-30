@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -20,7 +21,14 @@ pub struct Terminals {
 }
 
 impl Terminals {
-    pub fn open(&self, app: AppHandle, cwd: Option<String>, cols: u16, rows: u16) -> Result<u32> {
+    pub fn open(
+        &self,
+        app: AppHandle,
+        cwd: Option<String>,
+        cols: u16,
+        rows: u16,
+        path_dirs: Vec<PathBuf>,
+    ) -> Result<u32> {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let pair = native_pty_system()
             .openpty(size(cols, rows))
@@ -30,6 +38,9 @@ impl Terminals {
         command.env("TERM", "xterm-256color");
         if let Some(dir) = cwd.as_ref().filter(|dir| !dir.is_empty()) {
             command.cwd(dir);
+        }
+        if !path_dirs.is_empty() {
+            command.env("PATH", joined_path(&path_dirs));
         }
 
         let child = pair
@@ -108,6 +119,25 @@ fn size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
+fn joined_path(dirs: &[PathBuf]) -> String {
+    let dirs: Vec<String> = dirs
+        .iter()
+        .map(|dir| dir.to_string_lossy().to_string())
+        .collect();
+    let existing = std::env::var("PATH").unwrap_or_default();
+    join_paths(&dirs, &existing)
+}
+
+/// Folder DevKu ditaruh di depan supaya `php` yang dipasang lewat DevKu menang
+/// atas PHP lain di mesin ini.
+fn join_paths(dirs: &[String], existing: &str) -> String {
+    let mut parts: Vec<&str> = dirs.iter().map(String::as_str).collect();
+    if !existing.is_empty() {
+        parts.push(existing);
+    }
+    parts.join(if cfg!(windows) { ";" } else { ":" })
+}
+
 fn shell_command() -> CommandBuilder {
     #[cfg(windows)]
     {
@@ -138,4 +168,26 @@ pub fn ensure_alive(terminals: &Terminals, id: u32) -> Result<()> {
         bail!("terminal {id} sudah tertutup");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SEP: &str = if cfg!(windows) { ";" } else { ":" };
+
+    #[test]
+    fn path_dirs_go_before_inherited_entries() {
+        let dirs = vec!["C:\\DevKu\\bin".to_string()];
+        assert_eq!(
+            join_paths(&dirs, "C:\\Windows"),
+            format!("C:\\DevKu\\bin{SEP}C:\\Windows")
+        );
+    }
+
+    #[test]
+    fn empty_inherited_path_leaves_no_separator() {
+        let dirs = vec!["C:\\DevKu\\bin".to_string()];
+        assert_eq!(join_paths(&dirs, ""), "C:\\DevKu\\bin");
+    }
 }
