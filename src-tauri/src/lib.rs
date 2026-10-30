@@ -13,13 +13,29 @@ pub mod session;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri::Manager;
+
     let paths = paths::Paths::resolve();
     let session = session::Session::new(paths, None);
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState::new(session))
+        // Service menyala sendiri: membuka DevKu berarti localhost langsung hidup.
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = handle.state::<commands::AppState>();
+                let mut guard = state.session.lock().await;
+                if let Some(session) = guard.as_mut()
+                    && session.config().autostart
+                {
+                    let _ = session.start().await;
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::start,
@@ -30,6 +46,20 @@ pub fn run() {
             commands::detect_project,
             commands::tail_log,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building DevKu");
+
+    app.run(|handle, event| {
+        // Tanpa ini, menutup jendela meninggalkan php-cgi yang memegang port.
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            let state = handle.state::<commands::AppState>();
+            tauri::async_runtime::block_on(async {
+                if let Ok(mut guard) = state.session.try_lock()
+                    && let Some(session) = guard.as_mut()
+                {
+                    session.stop().await;
+                }
+            });
+        }
+    });
 }

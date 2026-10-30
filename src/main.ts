@@ -142,10 +142,9 @@ async function refresh(): Promise<void> {
 function schedulePoll(): void {
   if (pollTimer !== null) {
     window.clearInterval(pollTimer);
-    pollTimer = null;
   }
-  if (!snapshot?.running) return;
-
+  // Selalu memantau: service bisa menyala sendiri saat aplikasi dibuka, dan
+  // supervisor bisa memulai ulang pool kapan saja.
   pollTimer = window.setInterval(() => {
     void refresh();
   }, 2000);

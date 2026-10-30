@@ -66,6 +66,9 @@ pub struct Config {
     pub backend: Backend,
     #[serde(default = "default_tld")]
     pub tld: String,
+    /// Menyalakan service begitu aplikasi dibuka. Bisa dimatikan di config.
+    #[serde(default = "yes")]
+    pub autostart: bool,
     #[serde(default)]
     pub php: PhpSettings,
     #[serde(default)]
@@ -86,6 +89,7 @@ impl Default for Config {
             version: 1,
             backend: Backend::Caddy,
             tld: default_tld(),
+            autostart: true,
             php: PhpSettings {
                 installed: BTreeSet::new(),
                 active: String::new(),
@@ -165,4 +169,29 @@ pub fn touch(path: &Path) -> Result<()> {
         std::fs::create_dir_all(path)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_autostart_and_localhost_tld() {
+        let config = Config::default();
+        assert!(config.autostart);
+        assert_eq!(config.tld, "localhost");
+        assert!(config.sites.is_empty());
+    }
+
+    #[test]
+    fn old_config_without_autostart_defaults_to_on() {
+        let config: Config = serde_json::from_str(r#"{"version":1}"#).unwrap();
+        assert!(config.autostart);
+    }
+
+    #[test]
+    fn autostart_can_be_turned_off() {
+        let config: Config = serde_json::from_str(r#"{"autostart":false}"#).unwrap();
+        assert!(!config.autostart);
+    }
 }

@@ -358,6 +358,7 @@ mod tests {
             version: 1,
             backend: Backend::Caddy,
             tld: "localhost".to_string(),
+            autostart: true,
             php: PhpSettings {
                 installed: BTreeSet::new(),
                 active: "8.3.36".to_string(),
