@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 type Status = "starting" | "ready" | "backoff" | "failed" | "stopped";
 
@@ -22,6 +23,13 @@ interface Snapshot {
   caddy_installed: boolean;
   installed_php: string[];
   sites: SiteView[];
+  services: ServiceView[];
+}
+
+interface ServiceView {
+  name: string;
+  status: Status;
+  detail: string | null;
 }
 
 interface Detection {
@@ -187,6 +195,38 @@ function render(): void {
   renderNotice();
   renderList();
   renderDetail();
+  renderStatusbar();
+}
+
+function renderStatusbar(): void {
+  const node = el("statusbar");
+
+  if (loading || bootError || !snapshot) {
+    node.hidden = true;
+    node.innerHTML = "";
+    return;
+  }
+
+  node.hidden = false;
+
+  if (!snapshot.running) {
+    node.innerHTML =
+      '<span class="status-item"><span class="dot" data-status="stopped"></span>service berhenti</span>';
+    return;
+  }
+
+  const items = (snapshot.services ?? [])
+    .map(
+      (service) =>
+        `<span class="status-item"><span class="dot" data-status="${
+          service.status
+        }"></span>${esc(service.name)} <span class="status-word">${
+          STATUS_WORD[service.status] ?? service.status
+        }</span>${service.detail ? ` <span>· ${esc(service.detail)}</span>` : ""}</span>`,
+    )
+    .join("");
+
+  node.innerHTML = items || '<span class="status-item">tidak ada service</span>';
 }
 
 function renderHeader(): void {
@@ -213,18 +253,15 @@ function renderHeader(): void {
     : '<span class="dot" data-status="stopped"></span>Berhenti';
 
   if (running) {
-    actions.innerHTML = `<button class="btn" type="button" data-action="stop" ${
-      busy ? "disabled" : ""
-    }>${busy === "stop" ? "Menghentikan..." : "Hentikan"}</button>`;
+    actions.innerHTML = `<button class="btn" type="button" data-action="open-dashboard">Buka dasbor</button>
+      <button class="btn" type="button" data-action="stop" ${
+        busy ? "disabled" : ""
+      }>${busy === "stop" ? "Menghentikan..." : "Hentikan"}</button>`;
     return;
   }
 
-  const disabled = busy || caddyMissing || (snapshot?.sites.length ?? 0) === 0;
-  const title = caddyMissing
-    ? "Caddy belum terpasang"
-    : (snapshot?.sites.length ?? 0) === 0
-      ? "Belum ada situs"
-      : "";
+  const disabled = busy || caddyMissing;
+  const title = caddyMissing ? "Caddy belum terpasang" : "";
 
   actions.innerHTML = `<button class="btn btn-primary" type="button" data-action="start" ${
     disabled ? "disabled" : ""
@@ -776,6 +813,9 @@ document.addEventListener("click", (event) => {
       break;
     case "start":
       void start();
+      break;
+    case "open-dashboard":
+      void openUrl("http://localhost/");
       break;
     case "stop":
       void stop();

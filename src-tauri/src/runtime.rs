@@ -28,10 +28,9 @@ impl Runtime {
         paths.ensure()?;
         config.validate()?;
 
+        // Tanpa site pun runtime tetap berguna: Caddy menyajikan dasbor di
+        // port 80, jadi user melihat sesuatu alih-alih koneksi ditolak.
         let versions = config.php_versions_in_use();
-        if versions.is_empty() {
-            anyhow::bail!("tidak ada site aktif; tidak ada yang perlu dijalankan");
-        }
 
         let allocation = ports::allocate(&versions, PHP_PORT_START)?;
         let port_map: BTreeMap<String, u16> = allocation.into_iter().collect();

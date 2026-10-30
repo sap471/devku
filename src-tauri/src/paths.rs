@@ -75,6 +75,10 @@ impl Paths {
         self.runtime().join("Caddyfile")
     }
 
+    pub fn dashboard_dir(&self) -> PathBuf {
+        self.runtime().join("dashboard")
+    }
+
     pub fn ensure(&self) -> Result<()> {
         for dir in [
             self.root.clone(),

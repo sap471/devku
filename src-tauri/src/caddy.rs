@@ -97,8 +97,18 @@ impl CaddyBackend {
     ) -> Result<String> {
         let caddyfile = self.render(config, php_ports)?;
         self.validate(&caddyfile).await?;
+        self.write_dashboard(config)?;
         write_atomic(&self.paths.caddyfile(), &caddyfile)?;
         Ok(caddyfile)
+    }
+
+    /// Halaman yang dilayani di port 80 untuk `localhost` dan host yang tidak
+    /// dikenal. Ditulis ulang setiap config berubah, jadi isinya tidak basi.
+    pub fn write_dashboard(&self, config: &Config) -> Result<()> {
+        let dir = self.paths.dashboard_dir();
+        std::fs::create_dir_all(&dir)?;
+        write_atomic(&dir.join("index.html"), &render_dashboard(config))?;
+        Ok(())
     }
 }
 
@@ -110,9 +120,6 @@ impl WebServerBackend for CaddyBackend {
 
     fn render(&self, config: &Config, php_ports: &BTreeMap<String, u16>) -> Result<String> {
         let sites: Vec<_> = config.served_sites().collect();
-        if sites.is_empty() {
-            return Ok(empty_caddyfile());
-        }
 
         let mut out = String::from("{\n\tadmin localhost:2019\n\tauto_https off\n}\n");
 
@@ -148,6 +155,20 @@ impl WebServerBackend for CaddyBackend {
                 log = log,
             ));
         }
+
+        // Dasbor selalu ada, jadi port 80 tidak pernah kosong dan salah ketik
+        // domain mendarat di halaman yang menjelaskan keadaannya.
+        let dashboard = quote(&self.paths.dashboard_dir());
+        out.push_str(&format!(
+            "\nhttp://localhost, http://127.0.0.1 {{\n\
+             \troot * {dashboard}\n\
+             \tfile_server\n\
+             }}\n\
+             \nhttp:// {{\n\
+             \troot * {dashboard}\n\
+             \tfile_server\n\
+             }}\n"
+        ));
 
         Ok(out)
     }
@@ -198,6 +219,7 @@ impl WebServerBackend for CaddyBackend {
         }
 
         write_atomic(&self.paths.caddyfile(), &caddyfile)?;
+        self.write_dashboard(config)?;
         Ok(status)
     }
 
@@ -254,8 +276,69 @@ fn extract_load_error(body: &str) -> String {
     }
 }
 
-fn empty_caddyfile() -> String {
-    "{\n\tadmin localhost:2019\n\tauto_https off\n}\n".to_string()
+fn render_dashboard(config: &Config) -> String {
+    let mut items = String::new();
+    for site in config.served_sites() {
+        items.push_str(&format!(
+            r#"<li><a href="http://{domain}/">{name}</a><span>{domain} · php {php} · {fw}</span></li>"#,
+            domain = html_escape(&site.domain),
+            name = html_escape(&site.name),
+            php = html_escape(&site.php),
+            fw = html_escape(site.framework.as_deref().unwrap_or("php")),
+        ));
+    }
+
+    let content = if items.is_empty() {
+        "<p class=\"empty\">Belum ada situs. Tambahkan lewat aplikasi DevKu, lalu halaman ini memuat daftarnya.</p>".to_string()
+    } else {
+        format!("<ul class=\"sites\">{items}</ul>")
+    };
+
+    let style = r#"
+    :root { color-scheme: light dark; }
+    body { margin: 0; padding: 32px 24px; font: 14px/1.55 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+           background: #fafaf9; color: #18181b; }
+    header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 24px; }
+    header strong { font-size: 15px; letter-spacing: -0.01em; }
+    header span { font-size: 12px; color: #52525b; }
+    h1 { margin: 0 0 10px; font-size: 12px; font-weight: 650; letter-spacing: 0.07em;
+         text-transform: uppercase; color: #52525b; }
+    .sites { list-style: none; margin: 0; padding: 0; border-top: 1px solid #e4e4e7; }
+    .sites li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+                padding: 9px 0; border-bottom: 1px solid #e4e4e7; }
+    .sites a { color: #b45309; font-weight: 600; text-decoration: none; }
+    .sites a:hover, .sites a:focus-visible { text-decoration: underline; }
+    .sites span { font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+                  font-size: 12px; color: #52525b; }
+    .empty { color: #52525b; max-width: 48ch; }
+    footer { margin-top: 28px; font-size: 12px; color: #52525b; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0c0d0f; color: #e7e7ea; }
+      header span, h1, .sites span, .empty, footer { color: #a1a1aa; }
+      .sites, .sites li { border-color: #26292e; }
+      .sites a { color: #f59e0b; }
+    }
+    "#;
+
+    format!(
+        "<!doctype html>\n<html lang=\"id\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <meta http-equiv=\"refresh\" content=\"15\">\n<title>DevKu</title>\n\
+         <style>{style}</style>\n</head>\n<body>\n\
+         <header><strong>DevKu</strong><span>Dasbor</span></header>\n\
+         <main>\n<h1>Situs</h1>\n{content}\n</main>\n\
+         <footer>Halaman ini dibuat otomatis dan dimuat ulang tiap 15 detik.</footer>\n\
+         </body>\n</html>\n"
+    )
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 /// Caddyfile memakai spasi sebagai pemisah, jadi path dengan spasi harus dikutip.
@@ -362,6 +445,60 @@ mod tests {
         let text = caddy.render(&config, &BTreeMap::new()).unwrap();
         assert!(text.contains("admin localhost:2019"));
         assert!(!text.contains("php_fastcgi"));
+    }
+
+    #[test]
+    fn dashboard_lists_sites_and_escapes_names() {
+        let paths = Paths {
+            root: std::env::temp_dir().join(format!("devku-dash-{}", std::process::id())),
+        };
+        let caddy = CaddyBackend::new(paths);
+        let mut config = sample_config();
+        config.sites[0].name = "Toko <b>".to_string();
+
+        caddy.write_dashboard(&config).unwrap();
+        let html = std::fs::read_to_string(caddy.paths.dashboard_dir().join("index.html")).unwrap();
+
+        assert!(html.contains("Toko &lt;b&gt;"));
+        assert!(html.contains("app-a.localhost"));
+        assert!(html.contains("php 8.3.36"));
+
+        let _ = std::fs::remove_dir_all(&caddy.paths.root);
+    }
+
+    #[test]
+    fn dashboard_without_sites_explains_next_step() {
+        let paths = Paths {
+            root: std::env::temp_dir().join(format!("devku-dash-empty-{}", std::process::id())),
+        };
+        let caddy = CaddyBackend::new(paths);
+        let config = Config {
+            sites: Vec::new(),
+            ..Default::default()
+        };
+
+        caddy.write_dashboard(&config).unwrap();
+        let html = std::fs::read_to_string(caddy.paths.dashboard_dir().join("index.html")).unwrap();
+
+        assert!(html.contains("Belum ada situs"));
+
+        let _ = std::fs::remove_dir_all(&caddy.paths.root);
+    }
+
+    #[test]
+    fn render_always_serves_dashboard_on_port_80() {
+        let paths = Paths {
+            root: std::env::temp_dir(),
+        };
+        let caddy = CaddyBackend::new(paths);
+        let config = Config {
+            sites: Vec::new(),
+            ..Default::default()
+        };
+
+        let text = caddy.render(&config, &BTreeMap::new()).unwrap();
+        assert!(text.contains("http://localhost, http://127.0.0.1"));
+        assert!(text.contains("\nhttp:// {"));
     }
 
     #[test]
