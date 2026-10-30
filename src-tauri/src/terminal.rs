@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use anyhow::{bail, Context, Result};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use anyhow::{Context, Result, bail};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tauri::{AppHandle, Emitter};
 
 pub struct Session {

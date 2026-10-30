@@ -651,13 +651,16 @@ async function wizardNext(): Promise<void> {
       w.checking = false;
 
       if (!found) {
-        w.error =
-          "Tidak ada tanda project PHP di folder itu. Cari folder yang berisi index.php, artisan, atau spark.";
-        render();
-        return;
+        // Tanpa penanda PHP: tetap lanjut, akar web = folder yang dipilih.
+        w.detection = {
+          framework: "lain",
+          label: "Lain (tanpa PHP)",
+          document_root: path,
+          project_root: path,
+        };
+      } else {
+        w.detection = found;
       }
-
-      w.detection = found;
       w.step = 2;
       const folder = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "site";
       w.name = folder;

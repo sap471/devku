@@ -187,17 +187,26 @@ impl Session {
             bail!("folder {} tidak ada", draft.path.display());
         }
 
-        let found = detect::detect(&draft.path).with_context(|| {
-            format!(
-                "tidak menemukan tanda project PHP di {}. Pilih folder yang berisi index.php, artisan, atau spark.",
-                draft.path.display()
-            )
-        })?;
+        // Penanda PHP hanya petunjuk, bukan syarat. Folder statis, project
+        // Bun/Node, atau folder kosong tetap boleh dijadikan situs.
+        let found = detect::detect(&draft.path);
 
-        let framework = draft
-            .framework
-            .clone()
-            .unwrap_or_else(|| found.framework.to_string());
+        let (framework, document_root) = match &found {
+            Some(project) => (
+                draft
+                    .framework
+                    .clone()
+                    .unwrap_or_else(|| project.framework.to_string()),
+                project.document_root.clone(),
+            ),
+            None => (
+                draft
+                    .framework
+                    .clone()
+                    .unwrap_or_else(|| "lain".to_string()),
+                draft.path.clone(),
+            ),
+        };
 
         let id = match draft.id.clone() {
             Some(id) if !id.trim().is_empty() => slug(&id),
@@ -228,7 +237,7 @@ impl Session {
         let site = Site {
             id,
             name,
-            path: found.document_root,
+            path: document_root,
             domain,
             php,
             framework: Some(framework),
