@@ -11,6 +11,7 @@ pub mod proc;
 pub mod runtime;
 pub mod runtime_detect;
 pub mod session;
+pub mod terminal;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -23,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState::new(session))
+        .manage(terminal::Terminals::default())
         // Service menyala sendiri: membuka DevKu berarti localhost langsung hidup.
         .setup(|app| {
             let handle = app.handle().clone();
@@ -47,6 +49,10 @@ pub fn run() {
             commands::detect_project,
             commands::tail_log,
             commands::runtimes,
+            commands::open_terminal,
+            commands::write_terminal,
+            commands::resize_terminal,
+            commands::close_terminal,
         ])
         .build(tauri::generate_context!())
         .expect("error while building DevKu");

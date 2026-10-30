@@ -587,3 +587,35 @@ select.input {
 .status-word {
   color: var(--fg);
 }
+
+.actions-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Terminal ----------------------------------------------------------- */
+
+.terminal-pane {
+  flex: 0 0 auto;
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.terminal-pane[hidden] {
+  display: none;
+}
+
+.terminal-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px 8px;
+}
+
+.terminal-body .xterm {
+  height: 100%;
+}

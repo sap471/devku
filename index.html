@@ -12,7 +12,10 @@
     <header class="bar">
       <span class="brand">DevKu</span>
       <span class="bar-state" id="global-state"></span>
-      <div class="bar-actions" id="global-actions"></div>
+      <div class="bar-actions">
+        <button class="btn" type="button" data-action="toggle-terminal" id="terminal-toggle" aria-expanded="false">Terminal</button>
+        <span class="actions-slot" id="global-actions"></span>
+      </div>
     </header>
 
     <div class="notice" id="notice" hidden></div>
@@ -28,6 +31,14 @@
 
       <aside class="detail-pane" id="detail" aria-live="polite"></aside>
     </main>
+
+    <section class="terminal-pane" id="terminal-pane" hidden>
+      <div class="pane-head">
+        <h1>Terminal</h1>
+        <button class="btn btn-quiet" type="button" data-action="toggle-terminal">Tutup</button>
+      </div>
+      <div class="terminal-body" id="terminal"></div>
+    </section>
 
     <footer class="statusbar" id="statusbar"></footer>
   </body>

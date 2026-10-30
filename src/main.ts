@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import * as terminalPanel from "./terminal";
 
 type Status = "starting" | "ready" | "backoff" | "failed" | "stopped";
 
@@ -870,6 +871,11 @@ document.addEventListener("click", (event) => {
     case "open-dashboard":
       void openUrl("http://localhost/");
       break;
+    case "toggle-terminal": {
+      const active = snapshot?.sites.find((site) => site.id === selectedId);
+      terminalPanel.toggle(active?.path ?? null);
+      break;
+    }
     case "stop":
       void stop();
       break;

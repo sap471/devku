@@ -120,6 +120,46 @@ pub async fn runtimes(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+pub fn open_terminal(
+    app: tauri::AppHandle,
+    terminals: State<'_, crate::terminal::Terminals>,
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<u32, String> {
+    terminals
+        .open(app, cwd, cols.unwrap_or(80), rows.unwrap_or(24))
+        .map_err(error)
+}
+
+#[tauri::command]
+pub fn write_terminal(
+    terminals: State<'_, crate::terminal::Terminals>,
+    id: u32,
+    data: String,
+) -> Result<(), String> {
+    terminals.write(id, &data).map_err(error)
+}
+
+#[tauri::command]
+pub fn resize_terminal(
+    terminals: State<'_, crate::terminal::Terminals>,
+    id: u32,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    terminals.resize(id, cols, rows).map_err(error)
+}
+
+#[tauri::command]
+pub fn close_terminal(
+    terminals: State<'_, crate::terminal::Terminals>,
+    id: u32,
+) -> Result<(), String> {
+    terminals.close(id).map_err(error)
+}
+
 #[derive(Serialize)]
 pub struct DetectionView {
     pub framework: String,

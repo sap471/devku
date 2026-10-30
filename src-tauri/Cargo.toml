@@ -30,6 +30,7 @@ anyhow = "1"
 async-trait = "0.1"
 tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macros", "rt-multi-thread", "net", "signal"] }
 process-wrap = { version = "10", features = ["tokio1"] }
+portable-pty = "0.9"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
 

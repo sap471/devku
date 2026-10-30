@@ -8,6 +8,8 @@
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-dialog": "^2.8.4",
         "@tauri-apps/plugin-opener": "^2",
+        "@xterm/addon-fit": "^0.11.0",
+        "@xterm/xterm": "^6.0.0",
       },
       "devDependencies": {
         "@tauri-apps/cli": "^2",
@@ -80,6 +82,10 @@
     "@tauri-apps/plugin-dialog": ["@tauri-apps/plugin-dialog@2.8.4", "", { "dependencies": { "@tauri-apps/api": "^2.12.0" } }, "sha512-+6ZOiXenOaxXwb8qCbBPdT2jX2cFPaVVHGIskrpmJLpmWj+qKRTD6X/z9x7hTdSQn7NedcoXCkWGej4a7dC4lw=="],
 
     "@tauri-apps/plugin-opener": ["@tauri-apps/plugin-opener@2.7.2", "", { "dependencies": { "@tauri-apps/api": "^2.12.0" } }, "sha512-LyybP1VSzTMQiaFYcsbAse47KpivlyXdLZMQzGLEnkgQacGESnpjAfFoQ6h5sqWgAdZDH9szYjPzHMpv0Sz+TQ=="],
+
+    "@xterm/addon-fit": ["@xterm/addon-fit@0.11.0", "", {}, "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g=="],
+
+    "@xterm/xterm": ["@xterm/xterm@6.0.0", "", {}, "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg=="],
 
     "detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 
