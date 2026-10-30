@@ -9,6 +9,7 @@ pub mod php;
 pub mod ports;
 pub mod proc;
 pub mod runtime;
+pub mod runtime_detect;
 pub mod session;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -45,6 +46,7 @@ pub fn run() {
             commands::set_site_enabled,
             commands::detect_project,
             commands::tail_log,
+            commands::runtimes,
         ])
         .build(tauri::generate_context!())
         .expect("error while building DevKu");

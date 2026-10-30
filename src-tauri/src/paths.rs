@@ -79,6 +79,16 @@ impl Paths {
         self.runtime().join("dashboard")
     }
 
+    /// Binary yang DevKu sediakan sendiri kalau mesin tidak punya versinya.
+    pub fn bundled_binary(&self, name: &str) -> PathBuf {
+        let file = if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_string()
+        };
+        self.engines().join(name).join(file)
+    }
+
     pub fn ensure(&self) -> Result<()> {
         for dir in [
             self.root.clone(),

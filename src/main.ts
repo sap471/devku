@@ -32,6 +32,13 @@ interface ServiceView {
   detail: string | null;
 }
 
+interface RuntimeInfo {
+  name: string;
+  version: string | null;
+  source: string;
+  path: string | null;
+}
+
 interface Detection {
   framework: string;
   label: string;
@@ -62,6 +69,9 @@ let wizard: Wizard | null = null;
 let logFor: string | null = null;
 let logLines: string[] = [];
 let logError: string | null = null;
+
+let runtimesList: RuntimeInfo[] | null = null;
+let runtimesError: string | null = null;
 
 let pollTimer: number | null = null;
 let lastSnapshotJson = "";
@@ -111,6 +121,20 @@ async function load(): Promise<void> {
     render();
     schedulePoll();
   }
+
+  if (!bootError) void loadRuntimes();
+}
+
+async function loadRuntimes(): Promise<void> {
+  try {
+    runtimesList = await invoke<RuntimeInfo[]>("runtimes");
+    runtimesError = null;
+  } catch (err) {
+    runtimesList = [];
+    runtimesError = String(err);
+  }
+
+  if (!wizard && !selectedId) renderDetail();
 }
 
 function applySnapshot(next: Snapshot): void {
@@ -363,10 +387,35 @@ function renderDetail(): void {
 
   const site = snapshot?.sites.find((item) => item.id === selectedId);
   if (!site) {
+    const rows = (runtimesList ?? [])
+      .map((runtime) => {
+        const installed = runtime.source !== "tidak ada" && runtime.version;
+        const value = installed
+          ? `<span>${esc(runtime.version!)}</span> · ${esc(runtime.source)}${
+              runtime.path ? ` · ${esc(runtime.path)}` : ""
+            }`
+          : "tidak terpasang";
+        return `<dt>${esc(runtime.name)}</dt><dd>${value}</dd>`;
+      })
+      .join("");
+
+    const body = runtimesError
+      ? `<p class="field-error">${esc(runtimesError)}</p>`
+      : runtimesList === null
+        ? "<p class=\"hint\">Memeriksa runtime...</p>"
+        : rows
+          ? `<dl class="facts">${rows}</dl>`
+          : '<p class="hint">Tidak ada runtime yang terdeteksi.</p>';
+
     pane.innerHTML = `
-      <div class="state">
-        <h2>Detail situs</h2>
-        <p>Pilih salah satu situs untuk melihat domain, port PHP, folder, dan log-nya.</p>
+      <div class="detail-head"><h2>Runtime</h2></div>
+      <div class="detail-body">
+        <p class="hint">Pilih salah satu situs untuk melihat domain, port PHP, folder, dan log-nya.</p>
+        <div class="log-head">
+          <h3>Runtime sistem</h3>
+          <button class="btn" type="button" data-action="refresh-runtimes">Muat ulang</button>
+        </div>
+        ${body}
       </div>`;
     return;
   }
@@ -809,6 +858,11 @@ document.addEventListener("click", (event) => {
       break;
     case "refresh-log":
       if (selectedId) void loadLog(selectedId);
+      break;
+    case "refresh-runtimes":
+      runtimesList = null;
+      renderDetail();
+      void loadRuntimes();
       break;
     case "start":
       void start();

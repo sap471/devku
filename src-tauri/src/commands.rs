@@ -104,6 +104,22 @@ pub async fn set_site_enabled(
     Ok(session.snapshot().await)
 }
 
+#[tauri::command]
+pub async fn runtimes(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::runtime_detect::RuntimeInfo>, String> {
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    let paths = session.paths().clone();
+    // Deteksi menjalankan proses eksternal; jangan menahan runtime async.
+    tokio::task::spawn_blocking(move || crate::runtime_detect::detect(&paths))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 #[derive(Serialize)]
 pub struct DetectionView {
     pub framework: String,
