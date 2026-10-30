@@ -1,0 +1,8 @@
+{
+	admin localhost:2020
+	auto_https off
+}
+
+http://port80.localhost {
+	respond "caddy on port 80 ok" 200
+}

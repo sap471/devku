@@ -1,0 +1,18 @@
+{
+	admin localhost:2019
+	auto_https off
+}
+
+http://app-a.localhost:8080 {
+	root * D:/coding/devku/spike/site/app-a/public
+	encode gzip
+	php_fastcgi 127.0.0.1:9001
+	file_server
+}
+
+http://app-b.localhost:8081 {
+	root * D:/coding/devku/spike/site/app-b/public
+	encode gzip
+	php_fastcgi 127.0.0.1:9002
+	file_server
+}

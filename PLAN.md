@@ -1,0 +1,334 @@
+# DevKu — Plan
+
+Development environment untuk PHP di Windows: ringan, multi-PHP per domain, terintegrasi dengan runtime sistem.
+
+## Steps
+
+- [x] **Fase 0** — Fondasi: keputusan arsitektur, scaffold repo, spike teknis → [hasil](docs/spike-fase-0.md)
+- [ ] **Fase 1** — Core services: Caddy manager, php-cgi pool, hosts writer, port allocator
+- [ ] **Fase 2** — Project manager: CRUD site, downloader PHP, auto vhost, autodetect framework
+- [ ] **Fase 3** — Runtime integration: deteksi Bun/Node/PHP sistem, terminal, script runner
+- [ ] **Fase 4** — Polish & distribusi: tray, auto-update, installer, SSL trust, export config
+- [ ] **Fase 5 (v2)** — Pluggable backend: Apache sebagai opsi via Caddy reverse proxy
+
+---
+
+## 1. Ringkasan
+
+DevKu adalah pengganti XAMPP/Laragon yang lebih ringan dan modern, dengan fokus pada tiga hal yang tidak dimiliki Laragon: **multi-PHP per domain**, **integrasi runtime sistem**, dan **arsitektur backend yang bisa diganti**.
+
+### Prinsip desain
+
+1. **Ringan itu fitur, bukan bonus.** Proses yang tidak dipakai tidak jalan. Apache hanya hidup kalau ada site yang membutuhkannya.
+2. **Satu port untuk semua.** Semua hostname di `:80`/`:443`. Tidak ada `:8080` di URL.
+3. **Jangan duplikasi binary.** Kalau mesin sudah punya Bun/Node/PHP, pakai itu.
+4. **Config sebagai teks.** Semua config bisa dibaca, di-diff, dan di-commit.
+5. **Core tidak tahu backend.** Semua akses web server lewat satu interface.
+
+### Target terukur
+
+| Metrik | Target |
+|---|---|
+| RAM idle (tanpa site aktif) | ≤ 25 MB |
+| RAM dengan 2 site aktif | ≤ 70 MB |
+| Ukuran installer (tanpa PHP) | ≤ 15 MB |
+| Waktu tambah site baru | ≤ 10 detik |
+| Waktu ganti PHP version | ≤ 2 detik, tanpa restart site lain |
+
+---
+
+## 2. Pemetaan kriteria
+
+| # | Kriteria | Solusi |
+|---|---|---|
+| 1 | Mudah membuat environment baru | UI 3 langkah: pilih folder → pilih PHP → selesai. Domain otomatis `nama.localhost` |
+| 2 | Hostname untuk Laravel & CodeIgniter | `*.localhost` resolve native di Windows 11 (tanpa hosts) + vhost Caddy. Front controller `php_fastcgi` menangani keduanya |
+| 3 | Multi-PHP per path/domain | Satu listener `php-cgi` per versi di port unik; tiap site menunjuk ke listener versinya |
+| 4 | Bun sebagai runner TS default | Bun dibundel sebagai fallback; runner TS tanpa config di terminal panel |
+| 5 | Interface simpel | Tauri: satu window, daftar site, 1 tombol start/stop, terminal di bawah |
+| 6 | Ringan | Caddy + php-cgi lazy. Tanpa Chromium, tanpa Windows service, tanpa daemon permanen |
+| 7 | Integrasi Node/Bun sistem | Deteksi `PATH` saat first run; binary sistem dipakai, bundel hanya jika tidak ada |
+
+---
+
+## 3. Arsitektur
+
+```
+Browser  :80 / :443
+   │
+   ▼
+Caddy  :80/:443          ← edge: TLS, routing hostname, static files
+   │
+   ├── site modern ──────► php_fastcgi ──┐
+   │                                     │
+   └── site .htaccess ──► Apache :8080 ──┤   (v2, lazy — hanya jika dipakai)
+                          mod_fcgid      │
+                                         ▼
+                              php-cgi per versi (loopback)
+                              PHP 8.3 :9001  (PHP_FCGI_CHILDREN=4)
+                              PHP 7.4 :9002
+```
+
+### Hasil validasi Fase 0
+
+Empat spike dijalankan tanpa hak admin. Detail di [`docs/spike-fase-0.md`](docs/spike-fase-0.md). Yang mengubah desain:
+
+1. **TLD default `localhost`, bukan `test`.** Windows 11 me-resolve `*.localhost` ke loopback tanpa entri hosts — nol setup, nol UAC. Hosts editor turun jadi fallback untuk TLD custom.
+2. **`PHP_FCGI_CHILDREN` bekerja di Windows.** Tidak perlu banyak port + load balancing. Satu induk + N anak per versi, `2091 ms` vs `4193 ms` untuk dua request paralel.
+3. **Wajib supervisor.** Anak `php-cgi` yang mati direspawn otomatis, tapi matinya **induk** mematikan seluruh pool (`502`). DevKu harus memantau PID induk.
+4. **Port 80 bebas admin.** Windows tidak punya konsep privileged port. Risiko tersisa hanya reservasi `http.sys` (IIS). Terverifikasi: Caddy melayani `:80` tanpa elevasi.
+
+### Peta port
+
+| Port | Layanan | Bind | Catatan |
+|---|---|---|---|
+| 80 / 443 | Caddy | semua interface | tanpa admin di Windows (terverifikasi) |
+| 2019 | Caddy admin API | loopback | untuk reload config tanpa restart |
+| 8080 | Apache | loopback | hanya saat backend apache aktif |
+| 9001+ | php-cgi per versi | loopback | satu port per versi, pool via `PHP_FCGI_CHILDREN` |
+
+### Mengapa Caddy, bukan Nginx/Apache sebagai default
+
+- Satu binary, tanpa DLL.
+- `php_fastcgi` sudah mengandung `try_files` + front controller — persis kebutuhan Laravel/CI.
+- `tls internal` memberi HTTPS lokal tanpa setup manual.
+- Admin API memungkinkan reload per-site tanpa restart global.
+
+### Mengapa PHP bukan FPM
+
+PHP-FPM tidak tersedia untuk Windows. Yang dipakai `php-cgi.exe -b 127.0.0.1:PORT` mode FastCGI. Karena Windows tidak mendukung `fork`, process pooling harus disediakan pemanggil:
+
+- **Caddy**: DevKu spawn dan kelola sendiri sejumlah `php-cgi` per versi.
+- **Apache** (v2): `mod_fcgid` mengelola pool secara native — ini alasan tambahan Apache tetap relevan sebagai opsi.
+
+---
+
+## 4. Keputusan teknis
+
+| Area | Keputusan | Alasan |
+|---|---|---|
+| Web server default | Caddy 2 | Lihat §3 |
+| PHP runtime | `php-cgi.exe` FastCGI | Satu-satunya opsi nyata di Windows |
+| GUI | Tauri 2 (Rust + Web) | ~5 MB exe, pakai WebView2 bawaan. Bukan Electron |
+| Bahasa logika | Rust | Proses management, file watcher, Win32 API untuk hosts |
+| Config global | `%APPDATA%\DevKu\config.json` | Satu sumber kebenaran, format familiar |
+| Config per-site | `.devku.json` opsional di root project | Override yang bisa di-commit ke repo |
+| TLD default | `localhost` | Resolve otomatis di Windows 11, tanpa hosts & UAC |
+| Hosts editing | Hanya untuk TLD custom | Fallback opsional, bukan jalur utama |
+| Runner JS/TS | Bun (sistem → bundel → download) | Lihat §7 |
+| Hosts editing | Win32 API + UAC | Perlu elevasi; minta sekali lalu simpan hasil |
+| Auto-update | Tauri updater + signature | Distribusi tanpa installer ulang |
+| Package manager | **Bun** (fallback Node/npm) | Lihat §4.1 |
+
+### 4.1 Toolchain development
+
+DevKu sendiri dikembangkan dengan **Bun** sebagai package manager frontend/tooling, dan **cargo** untuk sisi Rust.
+
+| Tugas | Perintah |
+|---|---|
+| Install dependency | `bun install` |
+| Tambah paket | `bun add <pkg>` / `bun add -d <pkg>` |
+| Jalankan script | `bun run <script>` |
+| Jalankan binary | `bunx <tool>` |
+| Lockfile | `bun.lock` (commit), bukan `package-lock.json` |
+
+**Aturan fallback:** Bun adalah default, bukan preferensi. `npm` hanya dipakai bila Bun benar-benar gagal — resolver tidak menyelesaikan versi, postinstall butuh npm, atau paket native tidak mendukung Bun. Setiap fallback harus disebutkan alasannya, tidak diam-diam.
+
+Catatan: ini package manager untuk *mengembangkan* DevKu. Bun yang dibundel/dideteksi di §7 adalah fitur produk — dua hal berbeda.
+
+### Format config global
+
+```json
+{
+  "version": 1,
+  "backend": "caddy",
+  "tld": "localhost",
+  "runtimes": {
+    "bun":  { "source": "system", "path": "C:/Users/x/.bun/bin/bun.exe" },
+    "node": { "source": "system", "path": "C:/Program Files/nodejs/node.exe" }
+  },
+  "php": {
+    "installed": ["8.3.14", "7.4.33"],
+    "active": "8.3.14"
+  },
+  "sites": [
+    {
+      "id": "app-a",
+      "name": "App A",
+      "path": "D:/projects/app-a/public",
+      "domain": "app-a.localhost",
+      "php": "8.3.14",
+      "framework": "laravel",
+      "backend": "caddy",
+      "enabled": true
+    }
+  ]
+}
+```
+
+Alokasi port tidak disimpan permanen — dihitung ulang saat start dari daftar versi terurut. Ini mencegah port bentrok setelah user menghapus site.
+
+### Struktur folder aplikasi
+
+```
+DevKu/
+├── devku.exe                 # Tauri binary
+├── config/                   # generated
+│   ├── Caddyfile
+│   └── caddy/                # cert, autosave
+├── engines/
+│   ├── caddy/caddy.exe
+│   ├── php/8.3.14/           # php-cgi.exe + ext
+│   ├── php/7.4.33/
+│   └── bun/bun.exe           # opsional, hanya jika tidak ada di sistem
+├── runtime/                  # pid, log
+│   ├── pids/
+│   └── logs/
+└── sites/                    # default root situs baru
+```
+
+### Konfigurasi Caddy yang di-generate
+
+```caddyfile
+{
+    admin localhost:2019
+    local_certs
+}
+
+(log_common) {
+    log {
+        output file "{env.DEVKU_LOG_DIR}/{args[0]}.log"
+    }
+}
+
+app-a.localhost {
+    import log_common app-a
+    root * D:/projects/app-a/public
+    encode gzip
+    php_fastcgi 127.0.0.1:9001
+    file_server
+}
+```
+
+Satu blok per site. Reload lewat `POST /load` ke admin API — tidak perlu restart Caddy, tidak mengganggu site lain.
+
+---
+
+## 5. Fase detail
+
+### Fase 0 — Fondasi ✅
+
+**Tujuan:** hilangkan risiko teknis terbesar sebelum menulis UI.
+
+Deliverable:
+- [x] Scaffold `bun create tauri-app` + Rust workspace. Semua dependency JS lewat Bun (`bun install`, `bun add`).
+- [x] **Spike A:** `php-cgi -b 127.0.0.1:9001` + Caddy `php_fastcgi` → front controller bekerja, `/users/123` masuk ke `index.php`.
+- [x] **Spike B:** PHP 8.3.36 dan 7.4.33 paralel di dua domain, terisolasi, reload Caddy tanpa downtime.
+- [x] **Spike C:** `PHP_FCGI_CHILDREN` **bekerja** di Windows (asumsi awal salah). 4 anak → 2 request paralel 2091 ms vs 4193 ms serial. Anak respawn otomatis; induk mati = pool mati.
+- [x] **Spike D:** hosts butuh elevasi — tapi `*.localhost` resolve tanpa hosts di Windows 11, jadi jalur utama tidak perlu elevasi sama sekali.
+
+Hasil lengkap: [`docs/spike-fase-0.md`](docs/spike-fase-0.md).
+
+### Fase 1 — Core services
+
+Deliverable:
+- `WebServerBackend` trait: `add_site`, `remove_site`, `reload`, `status`, `start`, `stop`.
+- `CaddyBackend`: generator Caddyfile + kontrol admin API + manajemen proses.
+- `PhpManager`: unduh ekstrak PHP zip, daftar versi, spawn `php-cgi` per versi dengan `PHP_FCGI_CHILDREN`, health check.
+- `PhpSupervisor`: pantau PID induk `php-cgi`; restart saat exit, backoff bertingkat, catat alasan exit. Ini penjaga pool.
+- `HostsManager`: baca/tulis hosts dengan penanda blok `# devku:begin` / `# devku:end` agar bersih saat uninstall. **Hanya dipakai bila TLD ≠ `localhost`.**
+- `PortAllocator`: cari port bebas mulai 9001, hindari bentrok.
+- Log viewer minimal (tail file).
+
+Selesai bila: bisa menyalakan Caddy + 2 versi PHP dari CLI internal, dan `curl http://app-a.localhost` mengembalikan response PHP yang benar.
+
+### Fase 2 — Project manager
+
+Deliverable:
+- UI daftar site: nama, domain, versi PHP, framework, status.
+- Wizard tambah site: pilih folder → deteksi framework → pilih versi PHP → assign domain.
+- Autodetect framework: cari `artisan` (Laravel), `spark` (CI4), `system/` + `index.php` (CI3), fallback PHP polos.
+- Autodetect document root: `public/` untuk Laravel & CI4, root untuk CI3.
+- Folder watcher: menambah folder di root `sites/` otomatis menawarkan pembuatan site.
+- Hapus site: hapus vhost + hosts entry, **jangan** sentuh folder project.
+
+Selesai bila: user bisa membuat site Laravel baru dari nol dan membukanya di browser tanpa menyentuh config.
+
+### Fase 3 — Runtime integration
+
+Deliverable:
+- `RuntimeDetector`: `where bun`, `where node`, `where php`; catat sumber (system/bundled) ke config.
+- Fallback berlapis Bun: sistem → folder `engines/bun` → tawaran unduh.
+- Terminal panel: shell dengan `PATH` yang sudah diperkaya, `cd` otomatis ke root site aktif.
+- Script runner: tombol untuk `artisan migrate`, `artisan serve`, `composer install`, `bun run dev`.
+- `bun` sebagai default runner TS: `bun <file>.ts` langsung, tanpa config.
+- Indikator runtime di UI: "Bun 1.2.3 (sistem)" vs "(bundled)".
+
+Selesai bila: tidak ada binary ganda saat Bun/Node sudah terpasang, dan TS bisa dijalankan dari UI tanpa langkah setup.
+
+### Fase 4 — Polish & distribusi
+
+Deliverable:
+- Tray icon: start/stop semua, buka browser, keluar.
+- Auto-start Caddy saat login (opsional, off by default).
+- SSL trust: `caddy trust` dijalankan sekali, status ditampilkan.
+- Auto-update via Tauri updater.
+- Installer NSIS: tanpa PHP binary, unduh on-demand saat pertama pilih versi.
+- Export/import `config.json` untuk berbagi environment antar developer.
+- Onboarding first-run: deteksi runtime + tawaran install Caddy.
+
+Selesai bila: installer jalan di mesin Windows bersih, first-run selesai tanpa langkah manual.
+
+### Fase 5 — Pluggable backend (v2)
+
+Prasyarat: Fase 1–4 stabil dan `WebServerBackend` sudah dipakai di semua jalur.
+
+Deliverable:
+- `ApacheBackend`: generator `httpd.conf` + `VirtualHost` per site, `FcgidWrapper` per versi PHP.
+- Caddy sebagai edge untuk backend Apache: `reverse_proxy 127.0.0.1:8080` + header `X-Forwarded-Proto` dan `X-Forwarded-For`.
+- **Lazy spawn:** Apache hanya start bila ≥1 site ber-`backend: "apache"`. Matikan otomatis saat site terakhir Apache dimatikan.
+- Template `TrustProxies` untuk Laravel + panduan setelan CI agar HTTPS terdeteksi.
+- Pilihan backend di wizard site (bukan hanya global setting).
+- Migrasi site antar backend tanpa mengubah folder.
+
+Selesai bila: satu site `backend: apache` dengan `.htaccess` custom dan satu site `backend: caddy` berjalan bersamaan di port 80, dan Apache mati total saat site Apache dinonaktifkan.
+
+---
+
+## 6. Risiko & mitigasi
+
+| Risiko | Dampak | Mitigasi |
+|---|---|---|
+| Port 80 dipegang IIS/`http.sys` | Caddy gagal bind | Cek saat start, tampilkan proses penahan, tawarkan port alternatif |
+| Induk `php-cgi` mati | Seluruh pool mati, `502` | `PhpSupervisor` pantau PID induk, restart + backoff, tampilkan status di UI |
+| Konkurensi `php-cgi` | Request antre di luar ukuran pool | `PHP_FCGI_CHILDREN` per versi (default 4), bisa diatur per site |
+| TLD custom butuh hosts | Elevasi/UAC | Default `localhost` (tanpa hosts). Elevasi hanya saat user memilih TLD lain |
+| Windows 10 tidak resolve `*.localhost` | Site tidak terbuka | Deteksi saat first-run; tawarkan hosts otomatis atau TLD `test` |
+| Windows Defender flag binary | User ragu | Code signing cert; dokumentasi hash rilis |
+| Caddy belum populer di komunitas PHP Windows | Kurang tutorial | Sediakan "lihat Caddyfile" di UI + preset framework |
+| `.htaccess` custom tidak jalan di Caddy | Migrasi gagal | Fase 5 Apache backend; deteksi `.htaccess` non-standar dan sarankan Apache |
+| PHP extension butuh DLL tambahan | Error runtime | Sertakan `ext/` lengkap; preset `php.ini` per framework |
+
+---
+
+## 7. Non-goals (v1)
+
+- Bukan pengganti Composer — pakai Composer yang sudah ada di mesin atau unduh terpisah.
+- Tidak mengelola database server (MySQL/Postgres). Skema integrasi bisa masuk v2 lewat `docker compose` opsional.
+- Tanpa dukungan macOS/Linux di v1. Arsitektur tidak menutup kemungkinan, tapi backend dan hosts handling berbeda.
+- Tidak mengemulasi `.htaccess` di Caddy. Itu jalan pintas yang rapuh — Apache backend adalah jawaban yang benar.
+- Tidak membundel PHP di installer. Unduh on-demand agar installer tetap kecil.
+
+---
+
+## 8. Urutan eksekusi
+
+```
+Fase 0 ──► Fase 1 ──► Fase 2 ──► Fase 3 ──► Fase 4 ──► Fase 5
+ spike      core       UI site     runtime     polish     apache
+   ▲           ▲
+   │           └── v1 bisa dipakai (dogfood)
+   └── gate: semua spike lulus sebelum lanjut
+```
+
+Fase 2 selesai = sudah bisa dipakai sendiri untuk kerja harian. Mulai dari situ, feedback nyata mengoreksi prioritas Fase 3–4.
