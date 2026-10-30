@@ -170,6 +170,16 @@ async fn php_path_dirs(state: &State<'_, AppState>) -> Vec<PathBuf> {
     if !chosen.is_empty() {
         dirs.push(paths.php_dir(&chosen));
     }
+
+    // Bun bawaan hanya ada kalau mesin ini tidak punya Bun sendiri. Tanpa
+    // folder ini, tombol skrip `bun run ...` tidak akan menemukan binary-nya.
+    let bun = paths.bundled_binary("bun");
+    if bun.exists()
+        && let Some(dir) = bun.parent()
+    {
+        dirs.push(dir.to_path_buf());
+    }
+
     dirs
 }
 
@@ -209,16 +219,27 @@ pub struct PhpCatalogEntry {
 
 #[derive(Clone, Serialize)]
 struct DownloadProgress {
+    /// "php", "caddy", atau "bun". UI memakai ini untuk memilih baris mana yang
+    /// menampilkan progres.
+    target: &'static str,
     version: String,
     received: u64,
     total: Option<u64>,
     stage: &'static str,
 }
 
-fn report(app: &AppHandle, version: &str, received: u64, total: Option<u64>, stage: &'static str) {
+fn report(
+    app: &AppHandle,
+    target: &'static str,
+    version: &str,
+    received: u64,
+    total: Option<u64>,
+    stage: &'static str,
+) {
     let _ = app.emit(
         "download://progress",
         DownloadProgress {
+            target,
             version: version.to_string(),
             received,
             total,
@@ -274,7 +295,7 @@ async fn install_php_inner(
     cancel: &AtomicBool,
 ) -> anyhow::Result<()> {
     let client = download::client()?;
-    report(app, version, 0, None, "daftar");
+    report(app, "php", version, 0, None, "daftar");
 
     let releases = download::php_releases(&client).await?;
     let release = releases
@@ -287,13 +308,13 @@ async fn install_php_inner(
         &client,
         &release.url(),
         &archive,
-        &release.sha256,
+        Some(&release.sha256),
         cancel,
-        |received, total| report(app, version, received, total, "unduh"),
+        |received, total| report(app, "php", version, received, total, "unduh"),
     )
     .await?;
 
-    report(app, version, 0, None, "pasang");
+    report(app, "php", version, 0, None, "pasang");
 
     let manager = PhpManager::new(paths.clone());
     let install_version = version.to_string();
@@ -308,7 +329,133 @@ async fn install_php_inner(
     .await
     .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
 
-    report(app, version, 0, None, "selesai");
+    report(app, "php", version, 0, None, "selesai");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn install_caddy(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    slot: State<'_, download::Slot>,
+) -> Result<Snapshot, String> {
+    let paths = session_paths(&state).await?;
+    let cancel = slot.begin().map_err(error)?;
+    let result = install_caddy_inner(&app, &paths, &cancel).await;
+    slot.finish();
+    result.map_err(error)?;
+
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    Ok(session.snapshot().await)
+}
+
+async fn install_caddy_inner(
+    app: &AppHandle,
+    paths: &Paths,
+    cancel: &AtomicBool,
+) -> anyhow::Result<()> {
+    let client = download::client()?;
+    report(app, "caddy", "", 0, None, "daftar");
+
+    let asset = download::caddy_latest(&client).await?;
+    let checksum = download::caddy_checksum(&client, &asset.version, &asset.filename).await?;
+    let version = asset.version.clone();
+
+    let archive = paths.downloads().join(&asset.filename);
+    download::download(
+        &client,
+        &asset.url,
+        &archive,
+        Some(&checksum),
+        cancel,
+        |received, total| report(app, "caddy", &version, received, total, "unduh"),
+    )
+    .await?;
+
+    report(app, "caddy", &version, 0, None, "pasang");
+
+    let dir = paths.caddy_dir();
+    let zip = archive.clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::archive::extract(&zip, &dir)?;
+        let _ = std::fs::remove_file(&zip);
+        Ok(())
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
+
+    if !paths.caddy_binary().exists() {
+        anyhow::bail!("zip Caddy tidak berisi {}", paths.caddy_binary().display());
+    }
+
+    report(app, "caddy", &version, 0, None, "selesai");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn install_bun(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    slot: State<'_, download::Slot>,
+) -> Result<Snapshot, String> {
+    let paths = session_paths(&state).await?;
+    let cancel = slot.begin().map_err(error)?;
+    let result = install_bun_inner(&app, &paths, &cancel).await;
+    slot.finish();
+    result.map_err(error)?;
+
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    Ok(session.snapshot().await)
+}
+
+async fn install_bun_inner(
+    app: &AppHandle,
+    paths: &Paths,
+    cancel: &AtomicBool,
+) -> anyhow::Result<()> {
+    let client = download::client()?;
+    report(app, "bun", "", 0, None, "daftar");
+
+    let asset = download::bun_latest(&client).await?;
+    let version = asset.version.clone();
+    let archive = paths.downloads().join(&asset.filename);
+
+    // GitHub tidak menerbitkan checksum untuk Bun, jadi integritas berkas
+    // bergantung pada HTTPS ke github.com.
+    download::download(
+        &client,
+        &asset.url,
+        &archive,
+        None,
+        cancel,
+        |received, total| report(app, "bun", &version, received, total, "unduh"),
+    )
+    .await?;
+
+    report(app, "bun", &version, 0, None, "pasang");
+
+    let dir = paths.engines().join("bun");
+    let zip = archive.clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::archive::extract(&zip, &dir)?;
+        let _ = std::fs::remove_file(&zip);
+        Ok(())
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
+
+    let binary = paths.bundled_binary("bun");
+    if !binary.exists() {
+        anyhow::bail!("zip Bun tidak berisi {}", binary.display());
+    }
+
+    report(app, "bun", &version, 0, None, "selesai");
     Ok(())
 }
 
@@ -368,6 +515,42 @@ pub async fn disable_php_path(state: State<'_, AppState>) -> Result<Snapshot, St
 
     crate::path_env::unregister(session.paths()).map_err(error)?;
     Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn site_commands(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::scripts::CommandView>, String> {
+    let paths = session_paths(&state).await?;
+
+    // Deteksi runtime menjalankan proses eksternal; lakukan di luar lock dan
+    // di luar worker async.
+    let bun = tokio::task::spawn_blocking(move || {
+        crate::runtime_detect::detect(&paths)
+            .iter()
+            .any(|runtime| runtime.name == "bun" && runtime.version.is_some())
+    })
+    .await
+    .map_err(|err| err.to_string())?;
+
+    let root = {
+        let guard = state.session.lock().await;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| unavailable(&state.boot_error))?;
+        let site = session
+            .config()
+            .sites
+            .iter()
+            .find(|site| site.id == id)
+            .ok_or_else(|| format!("site {id} tidak ditemukan"))?;
+        site.root.clone().unwrap_or_else(|| site.path.clone())
+    };
+
+    tokio::task::spawn_blocking(move || crate::scripts::for_site(&root, bun))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 #[derive(Serialize)]

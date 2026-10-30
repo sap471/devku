@@ -1,4 +1,5 @@
 pub mod api;
+pub mod archive;
 pub mod caddy;
 pub mod commands;
 pub mod config;
@@ -12,6 +13,7 @@ pub mod ports;
 pub mod proc;
 pub mod runtime;
 pub mod runtime_detect;
+pub mod scripts;
 pub mod session;
 pub mod terminal;
 
@@ -63,6 +65,9 @@ pub fn run() {
             commands::set_default_php,
             commands::enable_php_path,
             commands::disable_php_path,
+            commands::install_caddy,
+            commands::install_bun,
+            commands::site_commands,
         ])
         .build(tauri::generate_context!())
         .expect("error while building DevKu");

@@ -626,10 +626,25 @@ select.input {
   background: var(--surface);
 }
 
+.path-row + .path-row {
+  margin-top: 6px;
+}
+
+.path-row .spacer {
+  flex: 1;
+}
+
 .path-value {
   font-family: var(--font-mono);
   font-size: 11.5px;
   word-break: break-all;
+}
+
+.command-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 /* Status bar --------------------------------------------------------- */

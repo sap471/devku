@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 
 const RELEASES_URL: &str = "https://windows.php.net/downloads/releases/releases.json";
 const RELEASES_BASE: &str = "https://windows.php.net/downloads/releases/";
@@ -157,13 +157,163 @@ fn rank(version: &str) -> (u32, u32, u32) {
     )
 }
 
-/// Mengunduh ke `dest` sambil menghitung SHA-256. Berkas yang tidak cocok
-/// langsung dihapus, jadi yang tersisa di disk selalu bisa dipercaya.
+/// Berkas rilis GitHub yang siap diunduh. Caddy dan Bun memakai alur yang sama,
+/// hanya nama berkasnya yang berbeda.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct RemoteAsset {
+    pub target: &'static str,
+    pub version: String,
+    pub filename: String,
+    pub url: String,
+    pub size: u64,
+}
+
+const GITHUB_API: &str = "https://api.github.com/repos";
+
+pub async fn caddy_latest(client: &Client) -> Result<RemoteAsset> {
+    let release = github_release(client, "caddyserver/caddy").await?;
+    let suffix = if cfg!(target_arch = "aarch64") {
+        "windows_arm64.zip"
+    } else {
+        "windows_amd64.zip"
+    };
+
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name.ends_with(suffix))
+        .with_context(|| format!("rilis Caddy {} tidak menyediakan {suffix}", release.tag))?;
+
+    Ok(RemoteAsset {
+        target: "caddy",
+        version: release.tag.trim_start_matches('v').to_string(),
+        filename: asset.name.clone(),
+        url: asset.url.clone(),
+        size: asset.size,
+    })
+}
+
+pub async fn bun_latest(client: &Client) -> Result<RemoteAsset> {
+    let release = github_release(client, "oven-sh/bun").await?;
+    let wanted = if cfg!(target_arch = "aarch64") {
+        "bun-windows-aarch64.zip"
+    } else {
+        "bun-windows-x64.zip"
+    };
+
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == wanted)
+        .with_context(|| format!("rilis Bun {} tidak menyediakan {wanted}", release.tag))?;
+
+    Ok(RemoteAsset {
+        target: "bun",
+        // Tag Bun berbentuk `bun-v1.4.4`.
+        version: release
+            .tag
+            .trim_start_matches("bun-")
+            .trim_start_matches('v')
+            .to_string(),
+        filename: asset.name.clone(),
+        url: asset.url.clone(),
+        size: asset.size,
+    })
+}
+
+struct GhRelease {
+    tag: String,
+    assets: Vec<GhAsset>,
+}
+
+struct GhAsset {
+    name: String,
+    url: String,
+    size: u64,
+}
+
+async fn github_release(client: &Client, repo: &str) -> Result<GhRelease> {
+    let text = client
+        .get(format!("{GITHUB_API}/{repo}/releases/latest"))
+        .send()
+        .await
+        .with_context(|| format!("gagal menghubungi api.github.com untuk {repo}"))?
+        .error_for_status()
+        .with_context(|| format!("GitHub menolak permintaan rilis {repo}"))?
+        .text()
+        .await
+        .context("gagal membaca data rilis GitHub")?;
+
+    parse_github_release(&text)
+}
+
+fn parse_github_release(text: &str) -> Result<GhRelease> {
+    let root: serde_json::Value =
+        serde_json::from_str(text).context("bentuk rilis GitHub tidak dikenali")?;
+
+    let tag = root
+        .get("tag_name")
+        .and_then(|value| value.as_str())
+        .context("rilis GitHub tanpa tag")?
+        .to_string();
+
+    let assets = root
+        .get("assets")
+        .and_then(|value| value.as_array())
+        .context("rilis GitHub tanpa daftar berkas")?
+        .iter()
+        .filter_map(|asset| {
+            Some(GhAsset {
+                name: asset.get("name")?.as_str()?.to_string(),
+                url: asset.get("browser_download_url")?.as_str()?.to_string(),
+                size: asset
+                    .get("size")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+            })
+        })
+        .collect();
+
+    Ok(GhRelease { tag, assets })
+}
+
+/// Caddy menerbitkan `caddy_<versi>_checksums.txt` berisi satu baris per berkas.
+pub async fn caddy_checksum(client: &Client, version: &str, filename: &str) -> Result<String> {
+    let url = format!(
+        "https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_checksums.txt"
+    );
+    let text = client
+        .get(url)
+        .send()
+        .await
+        .context("gagal mengunduh daftar checksum Caddy")?
+        .error_for_status()
+        .context("daftar checksum Caddy tidak tersedia")?
+        .text()
+        .await
+        .context("gagal membaca daftar checksum Caddy")?;
+
+    checksum_for(&text, filename)
+        .with_context(|| format!("{filename} tidak ada di daftar checksum Caddy"))
+}
+
+pub fn checksum_for(text: &str, filename: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        let digest = parts.next()?;
+        let name = parts.next()?;
+        (name.trim_start_matches('*') == filename).then(|| digest.to_string())
+    })
+}
+
+/// Mengunduh ke `dest` sambil menghitung checksum. Algoritmanya dipilih dari
+/// panjang nilai yang diumumkan (64 = SHA-256, 128 = SHA-512). Berkas yang tidak
+/// cocok langsung dihapus, jadi yang tersisa di disk selalu bisa dipercaya.
 pub async fn download(
     client: &Client,
     url: &str,
     dest: &Path,
-    expected_sha256: &str,
+    expected: Option<&str>,
     cancel: &AtomicBool,
     mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<()> {
@@ -182,7 +332,7 @@ pub async fn download(
 
     let mut file =
         std::fs::File::create(dest).with_context(|| format!("gagal membuat {}", dest.display()))?;
-    let mut hasher = Sha256::new();
+    let mut hasher = Hasher::for_expected(expected)?;
     let mut received: u64 = 0;
     let mut last_report = std::time::Instant::now() - Duration::from_secs(1);
 
@@ -217,14 +367,52 @@ pub async fn download(
     file.flush()?;
     drop(file);
 
-    let digest = hex(&hasher.finalize());
-    if !digest.eq_ignore_ascii_case(expected_sha256) {
-        let _ = std::fs::remove_file(dest);
-        bail!("SHA-256 tidak cocok (dapat {digest}); berkas unduhan dibuang");
-    }
-
+    hasher.verify(dest, expected)?;
     progress(received, total);
     Ok(())
+}
+
+enum Hasher {
+    Sha256(Sha256),
+    Sha512(Sha512),
+    Nothing,
+}
+
+impl Hasher {
+    fn for_expected(expected: Option<&str>) -> Result<Self> {
+        match expected.map(str::trim).filter(|value| !value.is_empty()) {
+            None => Ok(Self::Nothing),
+            Some(value) if value.len() == 64 => Ok(Self::Sha256(Sha256::new())),
+            Some(value) if value.len() == 128 => Ok(Self::Sha512(Sha512::new())),
+            Some(value) => bail!("checksum tidak dikenali: {value}"),
+        }
+    }
+
+    fn update(&mut self, chunk: &[u8]) {
+        match self {
+            Self::Sha256(hasher) => hasher.update(chunk),
+            Self::Sha512(hasher) => hasher.update(chunk),
+            Self::Nothing => {}
+        }
+    }
+
+    fn verify(self, dest: &Path, expected: Option<&str>) -> Result<()> {
+        let Some(expected) = expected else {
+            return Ok(());
+        };
+
+        let digest = match self {
+            Self::Sha256(hasher) => hex(&hasher.finalize()),
+            Self::Sha512(hasher) => hex(&hasher.finalize()),
+            Self::Nothing => return Ok(()),
+        };
+
+        if !digest.eq_ignore_ascii_case(expected.trim()) {
+            let _ = std::fs::remove_file(dest);
+            bail!("checksum tidak cocok (dapat {digest}); berkas unduhan dibuang");
+        }
+        Ok(())
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -250,6 +438,12 @@ mod tests {
         "nts-vs17-x64": { "zip": { "path": "php-8.4.27-1-nts.zip", "sha256": "bbb", "size": "34.63MB" } }
       }
     }"#;
+
+    const GH: &str = r#"{"tag_name":"v2.11.7","assets":[
+        {"name":"caddy_2.11.7_checksums.txt","browser_download_url":"https://x/checksums","size":10},
+        {"name":"caddy_2.11.7_windows_amd64.zip","browser_download_url":"https://x/win.zip","size":18479498},
+        {"name":"caddy_2.11.7_windows_amd64.sbom","browser_download_url":"https://x/sbom","size":20}
+    ]}"#;
 
     #[test]
     fn picks_nts_x64_and_skips_thread_safe_build() {
@@ -294,6 +488,53 @@ mod tests {
     }
 
     #[test]
+    fn github_release_reads_tag_and_assets() {
+        let release = parse_github_release(GH).unwrap();
+        assert_eq!(release.tag, "v2.11.7");
+        assert_eq!(release.assets.len(), 3);
+        assert_eq!(release.assets[1].size, 18479498);
+        assert_eq!(release.assets[1].url, "https://x/win.zip");
+    }
+
+    #[test]
+    fn caddy_asset_ends_with_windows_amd64_zip() {
+        let release = parse_github_release(GH).unwrap();
+        let asset = release
+            .assets
+            .iter()
+            .find(|asset| asset.name.ends_with("windows_amd64.zip"))
+            .unwrap();
+        assert_eq!(asset.name, "caddy_2.11.7_windows_amd64.zip");
+    }
+
+    #[test]
+    fn checksum_for_matches_exact_filename_only() {
+        let text = "abc  caddy_2.11.7_linux_amd64.tar.gz\ndef  caddy_2.11.7_windows_amd64.zip\n";
+        assert_eq!(
+            checksum_for(text, "caddy_2.11.7_windows_amd64.zip").as_deref(),
+            Some("def")
+        );
+        assert!(checksum_for(text, "caddy_2.11.7_windows_amd64.sbom").is_none());
+    }
+
+    #[test]
+    fn hasher_uses_algorithm_from_digest_length() {
+        assert!(matches!(
+            Hasher::for_expected(Some(&"a".repeat(64))).unwrap(),
+            Hasher::Sha256(_)
+        ));
+        assert!(matches!(
+            Hasher::for_expected(Some(&"a".repeat(128))).unwrap(),
+            Hasher::Sha512(_)
+        ));
+        assert!(matches!(
+            Hasher::for_expected(None).unwrap(),
+            Hasher::Nothing
+        ));
+        assert!(Hasher::for_expected(Some("abc")).is_err());
+    }
+
+    #[test]
     fn slot_allows_one_download_and_cancel_flips_the_flag() {
         let slot = Slot::default();
         let flag = slot.begin().unwrap();
@@ -311,6 +552,117 @@ mod tests {
     fn rank_ignores_rebuild_suffix() {
         assert_eq!(rank("8.3.36-1"), rank("8.3.36"));
         assert!(rank("8.4.27") > rank("8.3.36"));
+    }
+
+    /// Jalankan dengan `cargo test --lib installs_real_caddy -- --ignored`.
+    /// Mengunduh zip Caddy (~18 MB), memverifikasi SHA-512, lalu menjalankan
+    /// binary hasil ekstraksi.
+    #[test]
+    #[ignore = "butuh jaringan"]
+    fn installs_real_caddy_release() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let client = client().unwrap();
+
+        runtime.block_on(async {
+            let asset = caddy_latest(&client).await.unwrap();
+            let checksum = caddy_checksum(&client, &asset.version, &asset.filename)
+                .await
+                .unwrap();
+
+            let root = std::env::temp_dir().join(format!("devku-caddy-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let paths = crate::paths::Paths { root: root.clone() };
+
+            let archive = paths.downloads().join(&asset.filename);
+            let cancel = AtomicBool::new(false);
+            download(
+                &client,
+                &asset.url,
+                &archive,
+                Some(&checksum),
+                &cancel,
+                |_, _| {},
+            )
+            .await
+            .unwrap();
+
+            crate::archive::extract(&archive, &paths.caddy_dir()).unwrap();
+            assert!(paths.caddy_binary().exists(), "caddy.exe tidak ada");
+
+            let output = std::process::Command::new(paths.caddy_binary())
+                .arg("version")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains(&asset.version),
+                "versi tidak cocok"
+            );
+
+            let _ = std::fs::remove_dir_all(&root);
+        });
+    }
+
+    /// Jalankan dengan `cargo test --lib installs_real_bun -- --ignored`.
+    /// Mengunduh zip Bun (~55 MB) dan menjalankan binary hasil ekstraksi.
+    #[test]
+    #[ignore = "butuh jaringan"]
+    fn installs_real_bun_release() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let client = client().unwrap();
+
+        runtime.block_on(async {
+            let asset = bun_latest(&client).await.unwrap();
+
+            let root = std::env::temp_dir().join(format!("devku-bun-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let paths = crate::paths::Paths { root: root.clone() };
+
+            let archive = paths.downloads().join(&asset.filename);
+            let cancel = AtomicBool::new(false);
+            download(&client, &asset.url, &archive, None, &cancel, |_, _| {})
+                .await
+                .unwrap();
+
+            crate::archive::extract(&archive, &paths.engines().join("bun")).unwrap();
+            let binary = paths.bundled_binary("bun");
+            assert!(binary.exists(), "bun.exe tidak ada di {}", binary.display());
+
+            let output = std::process::Command::new(&binary)
+                .arg("--version")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).trim(),
+                asset.version
+            );
+
+            let _ = std::fs::remove_dir_all(&root);
+        });
+    }
+
+    /// Jalankan dengan `cargo test --lib resolves_caddy -- --ignored`.
+    /// Hanya membaca metadata rilis, tidak mengunduh zip-nya.
+    #[test]
+    #[ignore = "butuh jaringan"]
+    fn resolves_caddy_and_bun_releases() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let client = client().unwrap();
+
+        let caddy = runtime.block_on(caddy_latest(&client)).unwrap();
+        assert!(caddy.version.starts_with("2."), "versi {}", caddy.version);
+        assert!(caddy.filename.ends_with("windows_amd64.zip"));
+        assert!(caddy.size > 10_000_000, "ukuran {}", caddy.size);
+
+        let checksum = runtime
+            .block_on(caddy_checksum(&client, &caddy.version, &caddy.filename))
+            .unwrap();
+        assert_eq!(checksum.len(), 128, "Caddy memakai SHA-512");
+
+        let bun = runtime.block_on(bun_latest(&client)).unwrap();
+        assert_eq!(bun.version.split('.').count(), 3, "versi {}", bun.version);
+        assert!(bun.filename.starts_with("bun-windows-"));
     }
 
     /// Jalankan dengan `cargo test --lib installs_real_php -- --ignored`.
@@ -339,7 +691,7 @@ mod tests {
                 &client,
                 &release.url(),
                 &archive,
-                &release.sha256,
+                Some(&release.sha256),
                 &cancel,
                 |received, total| {
                     if let Some(total) = total {

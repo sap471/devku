@@ -101,6 +101,28 @@ export function toggle(cwd: string | null): void {
   }
 }
 
+/// Membuka terminal bila perlu, lalu mengetik satu perintah ke shell yang sama.
+/// `cd` dikirim lebih dulu supaya perintah selalu berjalan di folder situs yang
+/// sedang dipilih, bukan di folder situs sebelumnya.
+export async function run(cwd: string | null, command: string): Promise<void> {
+  const fresh = !isOpen();
+  await open(cwd);
+
+  const id = sessionId;
+  if (id === null) return;
+
+  if (fresh) {
+    // PowerShell belum siap menerima baris perintah tepat setelah spawn.
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+  }
+
+  const cd = cwd ? `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'` : "";
+  const data = cd ? `${cd}\r${command}\r` : `${command}\r`;
+
+  await invoke("write_terminal", { id, data });
+  terminal?.focus();
+}
+
 function refit(): void {
   fitAddon?.fit();
 }

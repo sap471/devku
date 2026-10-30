@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
@@ -65,44 +65,7 @@ impl PhpManager {
 
     pub fn extract(&self, zip_path: &Path, version: &str) -> Result<PathBuf> {
         let dest = self.paths.php_dir(version);
-        std::fs::create_dir_all(&dest)?;
-
-        let file = std::fs::File::open(zip_path)
-            .with_context(|| format!("gagal membuka {}", zip_path.display()))?;
-        let mut archive = zip::ZipArchive::new(file)
-            .with_context(|| format!("bukan zip: {}", zip_path.display()))?;
-
-        let names: Vec<String> = archive
-            .file_names()
-            .filter_map(|name| name.ok().map(|cow| cow.to_string()))
-            .collect();
-        let strip = common_root(&names);
-
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)?;
-            if entry.is_dir() {
-                continue;
-            }
-            let raw = entry.name().map(|cow| cow.to_string()).unwrap_or_default();
-            let relative = match &strip {
-                Some(root) => raw
-                    .strip_prefix(root)
-                    .unwrap_or(&raw)
-                    .trim_start_matches('/')
-                    .to_string(),
-                None => raw.clone(),
-            };
-            if relative.is_empty() {
-                continue;
-            }
-            let target = safe_join(&dest, &relative)?;
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let mut out = std::fs::File::create(&target)
-                .with_context(|| format!("gagal menulis {}", target.display()))?;
-            std::io::copy(&mut entry, &mut out)?;
-        }
+        crate::archive::extract(zip_path, &dest)?;
 
         if !self.binary(version).exists() {
             bail!(
@@ -179,70 +142,9 @@ impl PhpManager {
     }
 }
 
-/// PHP zip resmi biasanya datar, tapi unduhan pihak ketiga sering membungkus
-/// semuanya dalam satu folder. Deteksi itu supaya tidak jadi `8.3/8.3/php-cgi.exe`.
-fn common_root(names: &[String]) -> Option<String> {
-    // Ada file di akar zip? Berarti sudah datar, jangan strip apa pun.
-    if names.iter().any(|name| !name.contains('/')) {
-        return None;
-    }
-
-    let mut parts = names
-        .iter()
-        .map(|name| name.split('/').next().unwrap_or(""));
-    let first = parts.next()?.to_string();
-    if first.is_empty() {
-        return None;
-    }
-    if parts.all(|root| root == first) {
-        Some(first)
-    } else {
-        None
-    }
-}
-
-fn safe_join(base: &Path, relative: &str) -> Result<PathBuf> {
-    let candidate = Path::new(relative);
-    let mut out = base.to_path_buf();
-    for component in candidate.components() {
-        match component {
-            Component::Normal(part) => out.push(part),
-            Component::CurDir => {}
-            _ => bail!("entri zip berbahaya: {relative}"),
-        }
-    }
-    if !out.starts_with(base) {
-        bail!("entri zip keluar dari folder tujuan: {relative}");
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn common_root_detects_single_wrapper() {
-        let names = vec![
-            "php-8.3/php-cgi.exe".to_string(),
-            "php-8.3/ext/php_mbstring.dll".to_string(),
-        ];
-        assert_eq!(common_root(&names).as_deref(), Some("php-8.3"));
-    }
-
-    #[test]
-    fn common_root_none_when_flat() {
-        let names = vec!["php-cgi.exe".to_string(), "ext/mbstring.dll".to_string()];
-        assert_eq!(common_root(&names), None);
-    }
-
-    #[test]
-    fn safe_join_rejects_traversal() {
-        let base = Path::new("/tmp/php");
-        assert!(safe_join(base, "../evil.exe").is_err());
-        assert!(safe_join(base, "/abs/evil.exe").is_err());
-        assert!(safe_join(base, "ext/php_gd.dll").is_ok());
-    }
 
     #[test]
     fn ini_rewrites_extension_dir_and_enables_known_exts() {

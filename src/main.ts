@@ -61,10 +61,17 @@ interface PhpCatalogEntry {
 }
 
 interface DownloadProgress {
+  target: string;
   version: string;
   received: number;
   total: number | null;
   stage: string;
+}
+
+interface SiteCommand {
+  id: string;
+  label: string;
+  command: string;
 }
 
 interface Detection {
@@ -105,6 +112,10 @@ let phpCatalog: PhpCatalogEntry[] | null = null;
 let phpCatalogError: string | null = null;
 let phpCatalogLoading = false;
 let download: DownloadProgress | null = null;
+
+let commandsFor: string | null = null;
+let siteCommands: SiteCommand[] | null = null;
+let commandsError: string | null = null;
 
 let pollTimer: number | null = null;
 let lastSnapshotJson = "";
@@ -195,6 +206,71 @@ function paintCatalog(): void {
   if (node) node.innerHTML = renderPhpCatalog();
 }
 
+/// Kotak yang isinya bergantung pada unduhan yang sedang berjalan.
+function paintDownloads(): void {
+  paintCatalog();
+
+  const binaries = document.getElementById("binaries");
+  if (binaries) binaries.innerHTML = renderBinaries();
+}
+
+function percentOf(job: DownloadProgress): number {
+  return job.total ? Math.min(100, (job.received / job.total) * 100) : 0;
+}
+
+function downloadButton(target: "caddy" | "bun"): string {
+  const job = download?.target === target ? download : null;
+  if (job) {
+    return `<span class="catalog-progress">
+        <span class="progress"><span style="width:${percentOf(job)}%"></span></span>
+        <span class="hint">${esc(stageLabel(job))}</span>
+        <button class="btn btn-quiet" type="button" data-action="cancel-download">Batal</button>
+      </span>`;
+  }
+
+  const installable = target === "caddy" ? !snapshot?.caddy_installed : !hasBun();
+  if (!installable) return "";
+
+  return `<button class="btn" type="button" data-action="install-${target}" ${
+    download ? "disabled" : ""
+  }>Pasang</button>`;
+}
+
+function hasBun(): boolean {
+  return (runtimesList ?? []).some((runtime) => runtime.name === "bun" && runtime.version);
+}
+
+function renderBinaries(): string {
+  const caddy = snapshot?.caddy_installed
+    ? '<span class="tag">terpasang</span>'
+    : '<span class="tag">belum</span>';
+
+  const bunSource = (runtimesList ?? []).find((runtime) => runtime.name === "bun");
+  const bun = bunSource?.version
+    ? `<span class="tag">${esc(bunSource.source)}</span>`
+    : '<span class="tag">belum</span>';
+
+  return `
+    <div class="path-row">
+      <span class="catalog-version">Caddy</span>
+      ${caddy}
+      <span class="hint">server web, port 80 dan 443</span>
+      <span class="spacer"></span>
+      ${downloadButton("caddy")}
+    </div>
+    <div class="path-row">
+      <span class="catalog-version">Bun</span>
+      ${bun}
+      <span class="hint">${
+        bunSource?.version
+          ? esc(bunSource.path ?? "sistem")
+          : "bisa dipakai untuk TypeScript dan skrip package.json"
+      }</span>
+      <span class="spacer"></span>
+      ${downloadButton("bun")}
+    </div>`;
+}
+
 function renderPhpCatalog(): string {
   if (phpCatalogError) {
     return `<p class="field-error">${esc(phpCatalogError)}</p>`;
@@ -208,13 +284,13 @@ function renderPhpCatalog(): string {
 
   const rows = phpCatalog
     .map((entry) => {
-      const job = download?.version === entry.version ? download : null;
+      const job =
+        download?.target === "php" && download.version === entry.version ? download : null;
       let action: string;
 
       if (job) {
-        const percent = job.total ? Math.min(100, (job.received / job.total) * 100) : 0;
         action = `<span class="catalog-progress">
-            <span class="progress"><span style="width:${percent}%"></span></span>
+            <span class="progress"><span style="width:${percentOf(job)}%"></span></span>
             <span class="hint">${esc(stageLabel(job))}</span>
             <button class="btn btn-quiet" type="button" data-action="cancel-download">Batal</button>
           </span>`;
@@ -357,6 +433,110 @@ async function setPhpPath(enable: boolean): Promise<void> {
   }
 }
 
+function renderCommands(site: SiteView): string {
+  const loaded = commandsFor === site.id;
+  const tsButton = `<button class="btn" type="button" data-action="run-ts" ${
+    hasBun() ? "" : "disabled"
+  }>Jalankan .ts</button>`;
+
+  if (!loaded || (siteCommands === null && !commandsError)) {
+    return '<p class="hint">Menyiapkan perintah...</p>';
+  }
+  if (commandsError) {
+    return `<p class="field-error">${esc(commandsError)}</p>`;
+  }
+
+  const buttons = (siteCommands ?? [])
+    .map(
+      (item) =>
+        `<button class="btn" type="button" data-action="run-command" data-command="${esc(
+          item.command,
+        )}">${esc(item.label)}</button>`,
+    )
+    .join("");
+
+  const empty = buttons
+    ? ""
+    : '<p class="hint">Tidak ada yang bisa dijalankan. Folder ini tidak punya composer.json, artisan, spark, atau package.json.</p>';
+
+  const bunNote = hasBun()
+    ? ""
+    : '<p class="hint">Pasang Bun di dasbor untuk menjalankan berkas TypeScript.</p>';
+
+  return `${empty}
+    ${buttons ? `<div class="command-row">${buttons}</div>` : ""}
+    <div class="command-row">${tsButton}</div>
+    ${bunNote}`;
+}
+
+function paintCommands(): void {
+  const node = document.getElementById("commands");
+  const site = snapshot?.sites.find((item) => item.id === selectedId);
+  if (node && site) node.innerHTML = renderCommands(site);
+}
+
+async function loadCommands(id: string): Promise<void> {
+  if (commandsFor === id) return;
+
+  commandsFor = id;
+  siteCommands = null;
+  commandsError = null;
+  paintCommands();
+
+  try {
+    const list = await invoke<SiteCommand[]>("site_commands", { id });
+    // Situs lain bisa dipilih saat permintaan ini masih berjalan.
+    if (commandsFor === id) siteCommands = list;
+  } catch (err) {
+    if (commandsFor === id) {
+      siteCommands = [];
+      commandsError = String(err);
+    }
+  }
+
+  paintCommands();
+}
+
+async function runCommand(command: string): Promise<void> {
+  const site = snapshot?.sites.find((item) => item.id === selectedId);
+  if (!site) return;
+  await terminalPanel.run(site.root, command);
+}
+
+async function runTs(): Promise<void> {
+  const site = snapshot?.sites.find((item) => item.id === selectedId);
+  if (!site || !hasBun()) return;
+
+  const file = await open({
+    title: "Pilih berkas TypeScript",
+    multiple: false,
+    filters: [{ name: "TypeScript", extensions: ["ts", "tsx", "mts"] }],
+  });
+  if (typeof file !== "string") return;
+
+  await terminalPanel.run(site.root, `bun "${file}"`);
+}
+
+async function installBinary(target: "caddy" | "bun"): Promise<void> {
+  notice = null;
+  download = { target, version: "", received: 0, total: null, stage: "daftar" };
+  render();
+
+  try {
+    const next = await invoke<Snapshot>(`install_${target}`);
+    applySnapshot(next);
+  } catch (err) {
+    notice =
+      target === "caddy"
+        ? `Gagal memasang Caddy: ${String(err)}`
+        : `Gagal memasang Bun: ${String(err)}`;
+  } finally {
+    download = null;
+    render();
+    void loadRuntimes();
+  }
+}
+
 function stageLabel(job: DownloadProgress): string {
   if (job.stage === "unduh") {
     return job.total
@@ -372,7 +552,7 @@ const megabytes = (bytes: number) => `${(bytes / 1_048_576).toFixed(1).replace("
 
 async function installPhp(version: string): Promise<void> {
   notice = null;
-  download = { version, received: 0, total: null, stage: "daftar" };
+  download = { target: "php", version, received: 0, total: null, stage: "daftar" };
   render();
 
   try {
@@ -690,6 +870,11 @@ function renderDetail(): void {
         ${body}
 
         <div class="log-head">
+          <h3>Binary DevKu</h3>
+        </div>
+        <div id="binaries">${renderBinaries()}</div>
+
+        <div class="log-head">
           <h3>PHP</h3>
           <button class="btn" type="button" data-action="refresh-php">Muat ulang</button>
         </div>
@@ -751,6 +936,12 @@ function renderDetail(): void {
       ${phpField}
 
       <div class="log-head">
+        <h3>Perintah</h3>
+        <button class="btn" type="button" data-action="refresh-commands">Muat ulang</button>
+      </div>
+      <div id="commands">${renderCommands(site)}</div>
+
+      <div class="log-head">
         <h3>Log</h3>
         <button class="btn" type="button" data-action="refresh-log">Muat ulang</button>
       </div>
@@ -758,6 +949,7 @@ function renderDetail(): void {
     </div>`;
 
   bindSiteDetail(site);
+  void loadCommands(site.id);
   paintLog();
   if (logFor !== site.id) {
     logFor = null;
@@ -1214,6 +1406,26 @@ document.addEventListener("click", (event) => {
     case "disable-php-path":
       void setPhpPath(false);
       break;
+    case "install-caddy":
+      void installBinary("caddy");
+      break;
+    case "install-bun":
+      void installBinary("bun");
+      break;
+    case "run-command": {
+      const command = target.dataset.command;
+      if (command) void runCommand(command);
+      break;
+    }
+    case "run-ts":
+      void runTs();
+      break;
+    case "refresh-commands":
+      if (selectedId) {
+        commandsFor = null;
+        void loadCommands(selectedId);
+      }
+      break;
     case "start":
       void start();
       break;
@@ -1240,7 +1452,7 @@ document.addEventListener("click", (event) => {
 
 void listen<DownloadProgress>("download://progress", (event) => {
   download = event.payload;
-  paintCatalog();
+  paintDownloads();
 });
 
 if (document.readyState === "loading") {
