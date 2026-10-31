@@ -8,6 +8,27 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 
 ### Ditambahkan
 
+- Server **MariaDB 11.4.13** lokal lewat panel Database di dasbor: pasang, mulai,
+  stop, dan ceklis autostart sendiri. Versi dipatok dan diverifikasi dengan
+  `sha256sums.txt`. (`80a23e1`)
+- Kredensial database memakai user `root` tanpa password dan hanya mendengar di
+  `127.0.0.1`. Password disimpan di `runtime/mariadb/root.pass`, di luar
+  `config.json`, supaya tidak ikut ter-ekspor. (`80a23e1`)
+- Hapus MariaDB punya ceklis hapus data dan backup `.sql` otomatis ke folder
+  `backups`, yang langsung dibuka setelah selesai. (`80a23e1`)
+- Perintah `mariadb` dan `mariadb-dump` tersedia di terminal DevKu. (`80a23e1`)
+- Daftar **Terpasang** per versi PHP dengan aksi Edit php.ini, Mulai ulang, dan
+  Hapus. Katalog pemasangan hanya menampilkan versi yang belum terpasang.
+  (`e945210`)
+- **Edit php.ini** membuka berkas versi itu di VS Code, Zed, atau Notepad sesuai
+  yang terdeteksi. Perubahan berlaku setelah pool dimulai ulang. (`e945210`)
+- Hapus PHP menonaktifkan situs yang memakainya, memindahkan PHP default, dan
+  mengarahkan ulang Composer. Hapus semua PHP melepas shim dari PATH dan
+  mencapai keadaan 0 PHP terpasang. (`e945210`)
+- Dialog bersama untuk aksi destruktif: judul, daftar data, input, ceklis
+  bertingkat, dan tombol pilihan. Impor config dan hapus situs memakainya.
+  (`20dab20`)
+
 - Installer Windows NSIS per-machine dengan folder default `C:\devku`. Runtime
   dan config DevKu tetap berada di `%APPDATA%\DevKu`. Installer meminta UAC.
   (`6cc4912`)
@@ -78,6 +99,14 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 - README memuat status fase terbaru dan tautan ke changelog ini.
 
 ### Diperbaiki
+
+- Daftar checksum yang menulis nama berkas dengan awalan `./`, seperti milik
+  MariaDB, sekarang terbaca dan diverifikasi. (`80a23e1`)
+- Ceklis bertingkat di dialog kembali ke keadaan awalnya saat induknya dicentang
+  lagi, bukan tetap mati setelah sempat disembunyikan. (`80a23e1`)
+- Akun `root` yang ber-host nama mesin dilewati saat mengubah password, karena
+  server berjalan dengan `skip-name-resolve` dan akun itu memang diabaikan.
+  (`80a23e1`)
 
 - Jendela console tidak lagi berkedip saat DevKu memeriksa versi runtime, Composer,
   atau konfigurasi Caddy. (`6cc4912`)
