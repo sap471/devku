@@ -9,7 +9,7 @@ use crate::detect;
 use crate::download::{self, PhpRelease};
 use crate::paths::Paths;
 use crate::php::PhpManager;
-use crate::session::{Session, SiteDraft, Snapshot};
+use crate::session::{ImportReport, Session, SiteDraft, Snapshot};
 
 pub struct AppState {
     /// None berarti config gagal dibaca. UI harus menampilkan galat, bukan
@@ -623,6 +623,61 @@ pub async fn disable_php_path(state: State<'_, AppState>) -> Result<Snapshot, St
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
     crate::path_env::unregister(session.paths()).map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[derive(Serialize)]
+pub struct ImportResponse {
+    pub report: ImportReport,
+    pub snapshot: Snapshot,
+}
+
+/// Tulis config yang sedang dipakai ke berkas pilihan user.
+#[tauri::command]
+pub async fn export_config(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    let json = session.export_config().map_err(error)?;
+    std::fs::write(&path, json).map_err(|err| format!("gagal menulis {path}: {err}"))
+}
+
+/// Ganti config dengan berkas dari mesin lain, lalu selaraskan runtime.
+#[tauri::command]
+pub async fn import_config(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<ImportResponse, String> {
+    let text =
+        std::fs::read_to_string(&path).map_err(|err| format!("gagal membaca {path}: {err}"))?;
+
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    let report = session.import_config(&text).await.map_err(error)?;
+    Ok(ImportResponse {
+        report,
+        snapshot: session.snapshot().await,
+    })
+}
+
+/// Nyalakan atau matikan pembukaan DevKu saat user login (HKCU Run).
+#[tauri::command]
+pub async fn set_start_at_login(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<Snapshot, String> {
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    let exe = std::env::current_exe().map_err(|err| format!("tidak tahu lokasi DevKu: {err}"))?;
+    crate::autostart::set_enabled(&exe, enabled).map_err(error)?;
     Ok(session.snapshot().await)
 }
 

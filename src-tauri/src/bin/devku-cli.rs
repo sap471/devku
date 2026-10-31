@@ -42,6 +42,18 @@ async fn main() -> Result<()> {
         Some("runtimes") => runtimes(),
         Some("install-composer") => install_composer().await,
         Some("composer-path") => composer_path(args.get(1).map(String::as_str)),
+        Some("autostart") => autostart(args.get(1).map(String::as_str)),
+        Some("export-config") => export_config(
+            args.get(1)
+                .context("pakai: devku-cli export-config <berkas>")?,
+        ),
+        Some("import-config") => {
+            import_config(
+                args.get(1)
+                    .context("pakai: devku-cli import-config <berkas>")?,
+            )
+            .await
+        }
         Some("trust") => trust().await,
         Some(other) => {
             help();
@@ -69,6 +81,9 @@ fn help() {
          devku-cli runtimes\n  \
          devku-cli install-composer\n  \
          devku-cli composer-path [on|off]\n  \
+         devku-cli autostart [on|off]\n  \
+         devku-cli export-config <berkas>\n  \
+         devku-cli import-config <berkas>\n  \
          devku-cli trust\n\n\
          DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
     );
@@ -396,6 +411,74 @@ fn composer_path(mode: Option<&str>) -> Result<()> {
                 }
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Daftarkan atau lepas DevKu dari startup Windows. Nilai Run menunjuk
+/// `devku.exe` di folder yang sama dengan CLI ini.
+fn autostart(mode: Option<&str>) -> Result<()> {
+    let exe = std::env::current_exe()?.with_file_name("devku.exe");
+
+    match mode {
+        Some("on") => {
+            devku_lib::autostart::set_enabled(&exe, true)?;
+            println!(
+                "DevKu akan dibuka saat login: {}",
+                devku_lib::autostart::command_line(&exe)
+            );
+        }
+        Some("off") => {
+            devku_lib::autostart::set_enabled(&exe, false)?;
+            println!("DevKu tidak lagi dibuka saat login");
+        }
+        _ => {
+            println!("target     {}", devku_lib::autostart::command_line(&exe));
+            println!(
+                "di startup {}",
+                if devku_lib::autostart::is_enabled(&exe) {
+                    "ya"
+                } else {
+                    "tidak"
+                }
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Tulis config ke berkas supaya bisa dibagikan ke mesin lain.
+fn export_config(target: &str) -> Result<()> {
+    let paths = Paths::resolve();
+    let config = Config::load(&paths)?;
+    std::fs::write(target, serde_json::to_string_pretty(&config)?)
+        .with_context(|| format!("gagal menulis {target}"))?;
+    println!("config ditulis ke {target}");
+    Ok(())
+}
+
+/// Impor config dari berkas. Folder project yang tidak ada di mesin ini
+/// dilewati, dan situs dengan PHP belum terpasang dibuat nonaktif.
+async fn import_config(source: &str) -> Result<()> {
+    let text =
+        std::fs::read_to_string(source).with_context(|| format!("gagal membaca {source}"))?;
+    let mut session = devku_lib::session::Session::new(Paths::resolve(), None)?;
+    let report = session.import_config(&text).await?;
+
+    println!("{} situs diimpor", report.imported);
+    if !report.skipped.is_empty() {
+        println!("dilewati, folder tidak ada: {}", report.skipped.join(", "));
+    }
+    if !report.disabled.is_empty() {
+        println!(
+            "dinonaktifkan, PHP belum terpasang: {}",
+            report.disabled.join(", ")
+        );
+    }
+    if let Some(version) = report.active_php_cleared {
+        println!("php aktif dikosongkan: {version} belum terpasang");
     }
 
     Ok(())

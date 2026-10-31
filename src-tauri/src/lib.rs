@@ -1,5 +1,6 @@
 pub mod api;
 pub mod archive;
+pub mod autostart;
 pub mod caddy;
 pub mod commands;
 pub mod composer;
@@ -45,12 +46,21 @@ pub fn run() {
         .setup(|app| {
             tray::create(app.handle())?;
 
+            // Dibuka oleh Windows saat login: jangan tampilkan jendela, tapi
+            // service tetap dinyalakan supaya tray langsung berguna. Jendela
+            // dibuat tidak terlihat di config, lalu ditampilkan di sini untuk
+            // pemakaian biasa.
+            let hidden = std::env::args().any(|arg| arg == autostart::HIDDEN_FLAG);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = if hidden { window.hide() } else { window.show() };
+            }
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = handle.state::<commands::AppState>();
                 let mut guard = state.session.lock().await;
                 if let Some(session) = guard.as_mut()
-                    && session.config().autostart
+                    && (hidden || session.config().autostart)
                 {
                     let _ = session.start().await;
                 }
@@ -83,6 +93,9 @@ pub fn run() {
             commands::install_bun,
             commands::install_composer,
             commands::finish_onboarding,
+            commands::export_config,
+            commands::import_config,
+            commands::set_start_at_login,
             commands::enable_composer_global_path,
             commands::disable_composer_global_path,
             commands::site_commands,

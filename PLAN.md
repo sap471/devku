@@ -8,7 +8,7 @@ Development environment untuk PHP di Windows: ringan, multi-PHP per domain, teri
 - [x] **Fase 1** — Core services: Caddy manager, php-cgi pool + supervisor, port allocator → [hasil](docs/fase-1.md)
 - [x] **Fase 2** — Project manager: UI daftar + wizard + unduh/pasang PHP dari aplikasi
 - [x] **Fase 3** — Runtime integration: deteksi runtime, terminal PTY, script runner, unduh Caddy/Bun/Composer → [hasil](docs/fase-3.md)
-- [ ] **Fase 4** — Polish & distribusi: tray dan SSL trust selesai; sisa onboarding, installer NSIS, export config, auto-update, auto-start login
+- [ ] **Fase 4** — Polish & distribusi: tray, SSL trust, onboarding, export config, dan auto-start login selesai; sisa installer NSIS dan auto-update
 - [ ] **Fase 5 (v2)** — Pluggable backend: Apache sebagai opsi via Caddy reverse proxy
 
 ---
@@ -297,15 +297,15 @@ Deliverable:
 - [x] Tray icon: start/stop semua, buka browser, keluar (`3fcd348`).
 - [x] Tutup jendela menyembunyikan ke tray; keluar dari tray menghentikan service (`3fcd348`).
 - [x] SSL trust: `tls internal` per situs, `caddy trust` sekali, status ditampilkan (`ba46c69`).
-- [ ] Auto-start saat login (opsional, off by default). Catatan: `config.autostart` yang ada sekarang hanya menyalakan service saat aplikasi dibuka, bukan saat Windows login.
-- [ ] Auto-update via Tauri updater.
+- [x] Onboarding first-run: deteksi runtime, tawaran pasang Caddy, pilih PHP, lalu situs pertama. Status langkah dibaca dari keadaan nyata, bukan progres tersimpan.
+- [x] Export/import `config.json`. Impor melewati folder yang tidak ada, menonaktifkan situs dengan PHP belum terpasang, dan tidak menyalin status trust antar mesin.
+- [x] Auto-start saat login: nilai `HKCU\...\Run` berisi `"devku.exe" --hidden`; dibuka tanpa jendela, service langsung menyala. Bisa dilepas lagi dari UI atau `devku-cli autostart off`.
+- [ ] Auto-update via Tauri updater. Butuh kunci tanda tangan dan endpoint rilis dulu.
 - [ ] Installer NSIS: tanpa PHP binary, unduh on-demand saat pertama pilih versi. `bundle.targets` masih `"all"` dan belum pernah diuji di mesin bersih.
-- [ ] Export/import `config.json` untuk berbagi environment antar developer.
-- [ ] Onboarding first-run: deteksi runtime + tawaran install Caddy.
 
 Selesai bila: installer jalan di mesin Windows bersih, first-run selesai tanpa langkah manual.
 
-Urutan sisa: onboarding first-run → installer NSIS → export/import → auto-update → auto-start login.
+Urutan sisa: installer NSIS → auto-update.
 
 ### Fase 5 — Pluggable backend (v2)
 

@@ -70,8 +70,23 @@ pub struct Snapshot {
     pub composer_php_missing: bool,
     /// Folder paket global Composer, tempat `laravel` dan tool lain berada.
     pub composer_global: crate::composer::GlobalStatus,
+    /// Lokasi config yang sedang dipakai, supaya UI bisa menyebutnya.
+    pub config_path: String,
+    /// Nilai Run di registry untuk binary yang sedang berjalan, bukan sekadar
+    /// catatan config: user bisa mencabutnya lewat Task Manager.
+    pub start_at_login: bool,
     pub sites: Vec<SiteView>,
     pub services: Vec<ServiceView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ImportReport {
+    pub imported: usize,
+    /// Site yang foldernya tidak ada di mesin ini.
+    pub skipped: Vec<String>,
+    /// Site yang PHP-nya belum terpasang, jadi dinonaktifkan.
+    pub disabled: Vec<String>,
+    pub active_php_cleared: Option<String>,
 }
 
 /// Pemilik state aplikasi: config di disk + runtime yang mungkin hidup.
@@ -197,6 +212,8 @@ impl Session {
                 .map(|choice| choice.path.to_string_lossy().to_string()),
             composer_php_missing: composer.php_missing,
             composer_global: crate::composer::global_status(),
+            config_path: self.paths.config_file().to_string_lossy().to_string(),
+            start_at_login: crate::autostart::is_enabled(&crate::autostart::running_exe()),
             sites,
             services,
         }
@@ -368,6 +385,61 @@ impl Session {
         self.config.onboarded = true;
         self.config.save(&self.paths)?;
         Ok(())
+    }
+
+    pub fn export_config(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(&self.config)?)
+    }
+
+    /// Impor config dari mesin lain. Bagian yang terikat mesin ini tidak ikut
+    /// disalin mentah: kepercayaan CA tetap milik mesin ini, folder project
+    /// yang tidak ada dilewati, dan situs dengan PHP belum terpasang dibuat
+    /// nonaktif supaya pool tidak gagal dinyalakan.
+    pub async fn import_config(&mut self, text: &str) -> Result<ImportReport> {
+        let mut next: Config = serde_json::from_str(text).context("config tidak valid")?;
+        let installed = crate::php::PhpManager::new(self.paths.clone()).installed();
+
+        let mut skipped = Vec::new();
+        next.sites.retain(|site| {
+            let exists = site.path.exists();
+            if !exists {
+                skipped.push(site.name.clone());
+            }
+            exists
+        });
+
+        let mut disabled = Vec::new();
+        for site in &mut next.sites {
+            if !installed.iter().any(|version| version == &site.php) {
+                site.enabled = false;
+                disabled.push(format!("{} (PHP {})", site.name, site.php));
+            }
+        }
+
+        let active_php_cleared = if !next.php.active.is_empty()
+            && !installed.iter().any(|version| version == &next.php.active)
+        {
+            let cleared = next.php.active.clone();
+            next.php.active.clear();
+            Some(cleared)
+        } else {
+            None
+        };
+
+        next.https_trusted = self.config.https_trusted;
+        next.onboarded = true;
+        next.validate()?;
+
+        self.config = next;
+        self.config.save(&self.paths)?;
+        self.refresh().await?;
+
+        Ok(ImportReport {
+            imported: self.config.sites.len(),
+            skipped,
+            disabled,
+            active_php_cleared,
+        })
     }
 
     /// Setelah config berubah: nyalakan versi PHP yang baru dipakai, matikan

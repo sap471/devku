@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatBytes, formatDuration, parseAccessLog, statusTone } from "./log-format";
 import type { AccessLog } from "./log-format";
@@ -36,6 +36,8 @@ interface Snapshot {
   composer_php: string | null;
   composer_php_missing: boolean;
   composer_global: ComposerGlobal;
+  config_path: string;
+  start_at_login: boolean;
   sites: SiteView[];
   services: ServiceView[];
 }
@@ -90,6 +92,18 @@ interface DownloadProgress {
   stage: string;
 }
 
+interface ImportReport {
+  imported: number;
+  skipped: string[];
+  disabled: string[];
+  active_php_cleared: string | null;
+}
+
+interface ImportResponse {
+  report: ImportReport;
+  snapshot: Snapshot;
+}
+
 interface SiteCommand {
   id: string;
   label: string;
@@ -139,6 +153,10 @@ let download: DownloadProgress | null = null;
 let commandsFor: string | null = null;
 let siteCommands: SiteCommand[] | null = null;
 let commandsError: string | null = null;
+
+/// Hasil ekspor/impor config. Ditampilkan di baris Konfigurasi, bukan banner
+/// galat, karena impor yang berhasil bukan kegagalan.
+let configNotice: string | null = null;
 
 let pollTimer: number | null = null;
 let lastSnapshotJson = "";
@@ -673,6 +691,94 @@ async function finishOnboarding(): Promise<void> {
   }
 }
 
+async function exportConfig(): Promise<void> {
+  const path = await save({
+    title: "Simpan config DevKu",
+    defaultPath: "devku-config.json",
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (!path) return;
+
+  busy = "export-config";
+  configNotice = null;
+  render();
+
+  try {
+    await invoke("export_config", { path });
+    configNotice = `Config diekspor ke ${path}`;
+  } catch (err) {
+    notice = `Gagal mengekspor config: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function importConfig(): Promise<void> {
+  const path = await open({
+    title: "Pilih config DevKu",
+    multiple: false,
+    directory: false,
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (typeof path !== "string") return;
+
+  const lanjut = await confirm(
+    "Impor akan mengganti daftar situs, PHP default, dan TLD di mesin ini. Folder project tidak disentuh. Lanjut?",
+    { title: "Impor config", kind: "warning", okLabel: "Impor", cancelLabel: "Batal" },
+  );
+  if (!lanjut) return;
+
+  busy = "import-config";
+  notice = null;
+  configNotice = null;
+  render();
+
+  try {
+    const result = await invoke<ImportResponse>("import_config", { path });
+    applySnapshot(result.snapshot);
+    configNotice = summarizeImport(result.report);
+  } catch (err) {
+    notice = `Gagal mengimpor config: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+function summarizeImport(report: ImportReport): string {
+  const parts = [`${report.imported} situs diimpor`];
+  if (report.skipped.length) {
+    parts.push(`dilewati: ${report.skipped.join(", ")} (folder tidak ada)`);
+  }
+  if (report.disabled.length) {
+    parts.push(`nonaktif: ${report.disabled.join(", ")} (PHP belum terpasang)`);
+  }
+  if (report.active_php_cleared) {
+    parts.push(`PHP default dikosongkan (${report.active_php_cleared} belum terpasang)`);
+  }
+  return `${parts.join(". ")}.`;
+}
+
+async function setStartAtLogin(enable: boolean): Promise<void> {
+  busy = "start-login";
+  configNotice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("set_start_at_login", { enabled: enable });
+    applySnapshot(next);
+    configNotice = enable
+      ? "DevKu akan dibuka saat login berikutnya."
+      : "DevKu tidak lagi dibuka saat login.";
+  } catch (err) {
+    notice = `Gagal mengubah autostart: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
 async function trustCaddy(): Promise<void> {  notice = null;
   render();
   try {
@@ -1012,8 +1118,47 @@ function renderList(): void {
     .join("");
 }
 
-function caddyAction(): string {
-  return snapshot?.caddy_installed
+/// Ekspor/impor config untuk berbagi environment antar developer.
+function renderConfigSection(): string {
+  const status = configNotice
+    ? `<p class="hint config-status" role="status">${esc(configNotice)}</p>`
+    : "";
+
+  return `
+    <div class="log-head">
+      <h3>Konfigurasi</h3>
+    </div>
+    <div class="path-row">
+      <span class="catalog-version">Mulai saat login</span>
+      ${snapshot?.start_at_login ? '<span class="tag">aktif</span>' : '<span class="tag">tidak</span>'}
+      <span class="hint">Dibuka tanpa jendela saat login, service langsung dinyalakan.</span>
+      <span class="spacer"></span>
+      ${
+        snapshot?.start_at_login
+          ? `<button class="btn btn-quiet" type="button" data-action="disable-start-login" ${
+              busy ? "disabled" : ""
+            }>Matikan</button>`
+          : `<button class="btn" type="button" data-action="enable-start-login" ${
+              busy ? "disabled" : ""
+            }>Aktifkan</button>`
+      }
+    </div>
+    <div class="path-row">
+      <span class="catalog-version">config.json</span>
+      <span class="hint config-path">${esc(snapshot?.config_path ?? "config.json")}</span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-action="export-config" ${
+        busy ? "disabled" : ""
+      }>Ekspor</button>
+      <button class="btn" type="button" data-action="import-config" ${
+        busy ? "disabled" : ""
+      }>Impor</button>
+    </div>
+    <p class="hint">Impor mengganti daftar situs. Folder project tidak disentuh; situs yang foldernya tidak ada dilewati, dan situs dengan PHP belum terpasang dibuat nonaktif.</p>
+    ${status}`;
+}
+
+function caddyAction(): string {  return snapshot?.caddy_installed
     ? '<span class="tag">terpasang</span>'
     : downloadButton("caddy");
 }
@@ -1147,6 +1292,7 @@ function renderDetail(): void {
         </div>
         ${renderPhpSettings()}
         <div id="php-catalog">${renderPhpCatalog()}</div>
+        ${renderConfigSection()}
       </div>`;
     bindRuntime();
     void loadPhpCatalog();
@@ -1619,6 +1765,18 @@ document.addEventListener("click", (event) => {
       break;
     case "finish-onboarding":
       void finishOnboarding();
+      break;
+    case "export-config":
+      void exportConfig();
+      break;
+    case "import-config":
+      void importConfig();
+      break;
+    case "enable-start-login":
+      void setStartAtLogin(true);
+      break;
+    case "disable-start-login":
+      void setStartAtLogin(false);
       break;
     case "close-wizard":
       wizard = null;
