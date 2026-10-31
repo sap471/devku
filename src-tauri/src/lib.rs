@@ -16,6 +16,7 @@ pub mod runtime_detect;
 pub mod scripts;
 pub mod session;
 pub mod terminal;
+pub mod tray;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,8 +31,19 @@ pub fn run() {
         .manage(commands::AppState::new(session))
         .manage(terminal::Terminals::default())
         .manage(download::Slot::default())
+        // Tutup jendela hanya menyembunyikan; stop beneran lewat tray > Keluar.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         // Service menyala sendiri: membuka DevKu berarti localhost langsung hidup.
         .setup(|app| {
+            tray::create(app.handle())?;
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = handle.state::<commands::AppState>();
