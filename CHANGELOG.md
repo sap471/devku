@@ -82,6 +82,8 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 
 ### Diperbaiki
 
+- Teks bantuan `devku --help` dan `devku -h` kini juga dicetak di konsol saat
+  build release dijalankan langsung dari PowerShell atau cmd. (`fa5035f`)
 - Jendela console tidak lagi berkedip saat DevKu memeriksa versi runtime, Composer,
   atau konfigurasi Caddy. (`6cc4912`)
 
