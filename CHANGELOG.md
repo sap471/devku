@@ -10,9 +10,12 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 
 - Installer Windows NSIS per-machine dengan folder default `C:\devku`. Runtime
   dan config DevKu tetap berada di `%APPDATA%\DevKu`. Installer meminta UAC.
+  (`6cc4912`)
 - Menu **Buka** di panel situs: Explorer, Terminal, VS Code, Zed, dan salin path.
   Aplikasi yang tidak terpasang tampil nonaktif, bukan hilang tanpa penjelasan.
+  (`6cc4912`)
 - Tombol **Buka folder** untuk folder data DevKu di bagian Konfigurasi dasbor.
+  (`6cc4912`)
 
 - Fondasi proyek: scaffold Tauri 2, spike arsitektur multi-PHP per domain, Caddy
   sebagai edge, dan TLD `localhost` tanpa entri hosts. (`e35dd0a`)
@@ -77,7 +80,7 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 ### Diperbaiki
 
 - Jendela console tidak lagi berkedip saat DevKu memeriksa versi runtime, Composer,
-  atau konfigurasi Caddy.
+  atau konfigurasi Caddy. (`6cc4912`)
 
 - `default-run = "devku"` supaya `tauri dev` tidak ambigu antara aplikasi dan CLI.
   (`3246eb8`)
