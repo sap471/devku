@@ -84,7 +84,35 @@ pub struct Config {
     #[serde(default)]
     pub php: PhpSettings,
     #[serde(default)]
+    pub database: DatabaseSettings,
+    #[serde(default)]
     pub sites: Vec<Site>,
+}
+
+/// Pengaturan server database lokal.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DatabaseSettings {
+    /// Port TCP. 3306 adalah bawaan MariaDB dan yang dipakai `.env` Laravel,
+    /// jadi angka ini yang paling sering benar.
+    #[serde(default = "default_db_port")]
+    pub port: u16,
+    /// Database hanya menyala kalau dicentang. Default mati karena ini fitur
+    /// tambahan, bukan syarat menjalankan situs.
+    #[serde(default)]
+    pub autostart: bool,
+}
+
+fn default_db_port() -> u16 {
+    3306
+}
+
+impl Default for DatabaseSettings {
+    fn default() -> Self {
+        Self {
+            port: default_db_port(),
+            autostart: false,
+        }
+    }
 }
 
 fn one() -> u32 {
@@ -108,6 +136,7 @@ impl Default for Config {
                 active: String::new(),
                 children: default_children(),
             },
+            database: DatabaseSettings::default(),
             sites: Vec::new(),
         }
     }

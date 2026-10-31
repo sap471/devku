@@ -302,8 +302,30 @@ pub fn checksum_for(text: &str, filename: &str) -> Option<String> {
         let mut parts = line.split_whitespace();
         let digest = parts.next()?;
         let name = parts.next()?;
-        (name.trim_start_matches('*') == filename).then(|| digest.to_string())
+        // `sha256sum` menulis `*nama` untuk mode biner dan `./nama` untuk
+        // daftar yang dibuat dari dalam folder, seperti milik MariaDB.
+        let name = name.trim_start_matches('*').trim_start_matches("./");
+        (name == filename).then(|| digest.to_string())
     })
+}
+
+pub async fn mariadb_checksum(client: &Client) -> Result<String> {
+    let version = crate::database::VERSION;
+    let filename = crate::database::archive_name(version);
+
+    let text = client
+        .get(crate::database::checksums_url(version))
+        .send()
+        .await
+        .context("gagal mengunduh daftar checksum MariaDB")?
+        .error_for_status()
+        .context("daftar checksum MariaDB tidak tersedia")?
+        .text()
+        .await
+        .context("gagal membaca daftar checksum MariaDB")?;
+
+    checksum_for(&text, &filename)
+        .with_context(|| format!("{filename} tidak ada di daftar checksum MariaDB"))
 }
 
 /// Mengunduh ke `dest` sambil menghitung checksum. Algoritmanya dipilih dari

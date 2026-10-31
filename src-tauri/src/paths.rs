@@ -63,6 +63,39 @@ impl Paths {
         self.engines().join("caddy")
     }
 
+    pub fn mariadb_dir(&self) -> PathBuf {
+        self.engines().join("mariadb")
+    }
+
+    /// `bin/` harus tetap di samping `server.dll`: stub mysqld memuat server
+    /// dari folder yang sama.
+    pub fn mariadb_bin(&self) -> PathBuf {
+        self.mariadb_dir().join("bin")
+    }
+
+    /// Data user sengaja terpisah dari `engines/`, supaya memasang ulang binari
+    /// tidak menyentuh database.
+    pub fn mariadb_data(&self) -> PathBuf {
+        self.root.join("databases").join("mariadb")
+    }
+
+    pub fn mariadb_runtime(&self) -> PathBuf {
+        self.runtime().join("mariadb")
+    }
+
+    pub fn mariadb_config(&self) -> PathBuf {
+        self.mariadb_runtime().join("my.ini")
+    }
+
+    /// Password root disimpan di luar `config.json` supaya tidak ikut ter-ekspor.
+    pub fn mariadb_password(&self) -> PathBuf {
+        self.mariadb_runtime().join("root.pass")
+    }
+
+    pub fn backups(&self) -> PathBuf {
+        self.root.join("backups")
+    }
+
     pub fn runtime(&self) -> PathBuf {
         self.root.join("runtime")
     }

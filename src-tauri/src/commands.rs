@@ -207,6 +207,12 @@ async fn php_path_dirs(state: &State<'_, AppState>) -> Vec<PathBuf> {
         dirs.push(composer_global);
     }
 
+    // `mariadb` dan `mariadb-dump` bisa dipakai langsung di terminal DevKu.
+    let mariadb_bin = paths.mariadb_bin();
+    if mariadb_bin.is_dir() {
+        dirs.push(mariadb_bin);
+    }
+
     dirs
 }
 
@@ -687,6 +693,168 @@ pub async fn remove_all_php(state: State<'_, AppState>) -> Result<PhpRemovalResp
         removal,
         snapshot: session.snapshot().await,
     })
+}
+
+#[derive(Serialize)]
+pub struct DatabaseRemovalResponse {
+    pub removal: crate::session::DatabaseRemoval,
+    /// Path berkas .sql kalau backup diminta.
+    pub backup: Option<String>,
+    pub snapshot: Snapshot,
+}
+
+#[tauri::command]
+pub async fn install_database(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    slot: State<'_, download::Slot>,
+) -> Result<Snapshot, String> {
+    let paths = session_paths(&state).await?;
+    let cancel = slot.begin().map_err(error)?;
+    let result = install_database_inner(&app, &paths, &cancel).await;
+    slot.finish();
+    result.map_err(error)?;
+
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    session.prepare_database().await.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+async fn install_database_inner(
+    app: &AppHandle,
+    paths: &Paths,
+    cancel: &AtomicBool,
+) -> anyhow::Result<()> {
+    let client = download::client()?;
+    let version = crate::database::VERSION;
+    let filename = crate::database::archive_name(version);
+    report(app, "mariadb", version, 0, None, "daftar");
+
+    let checksum = download::mariadb_checksum(&client).await?;
+    let archive = paths.downloads().join(&filename);
+    download::download(
+        &client,
+        &crate::database::archive_url(version),
+        &archive,
+        Some(&checksum),
+        cancel,
+        |received, total| report(app, "mariadb", version, received, total, "unduh"),
+    )
+    .await?;
+
+    report(app, "mariadb", version, 0, None, "pasang");
+
+    // Ekstraksi butuh waktu: sekitar 300 MB berkas kecil.
+    let dir = paths.mariadb_dir();
+    let zip = archive.clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::archive::extract(&zip, &dir)?;
+        let _ = std::fs::remove_file(&zip);
+        Ok(())
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
+
+    if !paths.mariadb_bin().join("mysqld.exe").exists() {
+        anyhow::bail!("zip MariaDB tidak berisi bin/mysqld.exe");
+    }
+
+    report(app, "mariadb", version, 0, None, "selesai");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_database(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.start_database().await.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn stop_database(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.stop_database().await.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn set_database_autostart(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session
+        .set_database_autostart(enabled)
+        .await
+        .map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn reset_database_password(
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session
+        .reset_database_password(&password)
+        .await
+        .map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn remove_database(
+    state: State<'_, AppState>,
+    remove_data: bool,
+    backup: bool,
+) -> Result<DatabaseRemovalResponse, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    // Backup hanya masuk akal kalau datanya memang ikut dibuang.
+    let backup_path = if backup && remove_data {
+        Some(session.backup_database().await.map_err(error)?)
+    } else {
+        None
+    };
+
+    let removal = session.remove_database(remove_data).await.map_err(error)?;
+
+    Ok(DatabaseRemovalResponse {
+        removal,
+        backup: backup_path.map(|path| path.to_string_lossy().to_string()),
+        snapshot: session.snapshot().await,
+    })
+}
+
+#[tauri::command]
+pub async fn open_backups(state: State<'_, AppState>) -> Result<String, String> {
+    let paths = session_paths(&state).await?;
+    std::fs::create_dir_all(paths.backups()).map_err(|err| error(anyhow::Error::from(err)))?;
+    crate::launcher::open(&paths.backups(), "explorer").map_err(error)?;
+    Ok(paths.backups().to_string_lossy().to_string())
 }
 
 #[derive(Serialize)]

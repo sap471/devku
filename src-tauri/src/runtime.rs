@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::caddy::{CaddyBackend, WebServerBackend};
 use crate::config::Config;
+use crate::database::{DatabaseBackend, Mariadb};
 use crate::paths::Paths;
 use crate::php::PhpManager;
 use crate::ports;
@@ -19,6 +20,11 @@ pub struct Runtime {
     ports: BTreeMap<String, u16>,
     php: Vec<(String, Supervisor)>,
     caddy: Option<Supervisor>,
+    database: Option<Supervisor>,
+    /// Database terpasang dan datadir-nya sudah siap, jadi layak ditampilkan
+    /// sebagai service meski sedang berhenti.
+    database_present: bool,
+    database_error: Option<String>,
 }
 
 pub type Hook = Arc<dyn Fn(&str, &ServiceState) + Send + Sync>;
@@ -39,7 +45,23 @@ impl Runtime {
             ports: BTreeMap::new(),
             php: Vec::new(),
             caddy: None,
+            database: None,
+            database_present: false,
+            database_error: None,
         };
+
+        let database = Mariadb::new(paths.clone());
+        runtime.database_present = database.is_installed() && database.is_initialized();
+        if runtime.database_present
+            && config.database.autostart
+            && let Err(err) = runtime
+                .ensure_database(config.database.port, &paths, hook.clone())
+                .await
+        {
+            // Database tidak menghalangi situs: kegagalan dicatat, service
+            // lain tetap menyala.
+            runtime.database_error = Some(format!("{err:#}"));
+        }
 
         for version in port_map.keys() {
             runtime
@@ -155,6 +177,56 @@ impl Runtime {
         Ok(port)
     }
 
+    /// Menyalakan database di port yang diminta. Port yang bentrok dilaporkan
+    /// apa adanya, bukan digeser diam-diam, supaya `.env` tidak rusak sendiri.
+    pub async fn ensure_database(
+        &mut self,
+        port: u16,
+        paths: &Paths,
+        hook: Option<Hook>,
+    ) -> Result<u16> {
+        let backend = Mariadb::new(paths.clone());
+        if !backend.is_installed() || !backend.is_initialized() {
+            anyhow::bail!("database belum siap");
+        }
+        if !ports::is_free(port) {
+            anyhow::bail!("port {port} sudah dipakai proses lain");
+        }
+
+        let spec = backend.spec(port)?;
+        self.start_database_spec(spec, hook).await?;
+        self.database_present = true;
+        Ok(port)
+    }
+
+    /// Menjalankan spec database apa adanya, termasuk spec pemulihan password.
+    pub async fn start_database_spec(
+        &mut self,
+        spec: ServiceSpec,
+        hook: Option<Hook>,
+    ) -> Result<()> {
+        self.stop_database().await;
+
+        let supervisor = Supervisor::start(spec, hook)?;
+        if let Err(reason) = supervisor.wait_ready(Duration::from_secs(30)).await {
+            supervisor.shutdown().await;
+            anyhow::bail!("database gagal siap: {reason}");
+        }
+        self.database = Some(supervisor);
+        self.database_error = None;
+        Ok(())
+    }
+
+    pub async fn stop_database(&mut self) {
+        if let Some(supervisor) = self.database.take() {
+            supervisor.shutdown().await;
+        }
+    }
+
+    pub fn database_running(&self) -> bool {
+        self.database.is_some()
+    }
+
     /// Reload config tanpa mematikan apa pun.
     pub async fn reload(&self, config: &Config, paths: Paths) -> Result<u16> {
         let backend = CaddyBackend::new(paths);
@@ -177,11 +249,31 @@ impl Runtime {
         for (version, supervisor) in &self.php {
             out.push((format!("php-{version}"), supervisor.state().await));
         }
+        if let Some(database) = &self.database {
+            out.push(("mariadb".to_string(), database.state().await));
+        } else if let Some(reason) = &self.database_error {
+            out.push((
+                "mariadb".to_string(),
+                ServiceState::Failed {
+                    reason: reason.clone(),
+                },
+            ));
+        } else if self.database_present {
+            out.push(("mariadb".to_string(), ServiceState::Stopped));
+        }
         out
     }
 
     pub async fn shutdown(self) {
-        let Self { caddy, php, .. } = self;
+        let Self {
+            caddy,
+            php,
+            database,
+            ..
+        } = self;
+        if let Some(database) = database {
+            database.shutdown().await;
+        }
         if let Some(caddy) = caddy {
             caddy.shutdown().await;
         }

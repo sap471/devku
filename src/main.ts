@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { openDialog } from "./dialog";
+import type { DialogCheckbox } from "./dialog";
 import { formatBytes, formatDuration, parseAccessLog, statusTone } from "./log-format";
 import type { AccessLog } from "./log-format";
 import * as terminalPanel from "./terminal";
@@ -42,6 +43,7 @@ interface Snapshot {
   start_at_login: boolean;
   sites: SiteView[];
   services: ServiceView[];
+  database: DatabaseView;
 }
 
 interface PathStatus {
@@ -122,6 +124,31 @@ interface PhpRemoval {
 
 interface PhpRemovalResponse {
   removal: PhpRemoval;
+  snapshot: Snapshot;
+}
+
+interface DatabaseView {
+  engine: string;
+  label: string;
+  version: string;
+  installed: boolean;
+  initialized: boolean;
+  port: number;
+  autostart: boolean;
+  status: Status;
+  detail: string | null;
+  data_path: string;
+  bin_path: string;
+  has_password: boolean;
+}
+
+interface DatabaseRemoval {
+  removed_data: boolean;
+}
+
+interface DatabaseRemovalResponse {
+  removal: DatabaseRemoval;
+  backup: string | null;
   snapshot: Snapshot;
 }
 
@@ -287,6 +314,9 @@ function paintDownloads(): void {
 
   const caddy = document.getElementById("onboarding-caddy");
   if (caddy) caddy.innerHTML = caddyAction();
+
+  const database = document.getElementById("database-panel");
+  if (database) database.innerHTML = renderDatabase();
 }
 
 function percentOf(job: DownloadProgress): number {
@@ -553,6 +583,83 @@ function renderPhpSettings(): string {
       }>Daftarkan</button>
     </div>
     <p class="hint">Menambahkan folder itu ke PATH pengguna, tanpa admin dan bisa dilepas lagi. Perintah <code>php</code> lalu bisa dipakai di terminal mana pun.</p>`;
+}
+
+/// Panel database lokal. Terpisah dari PHP karena situs tetap jalan walau
+/// database mati.
+function renderDatabase(): string {
+  const db = snapshot?.database;
+  if (!db) return "";
+
+  const job = download?.target === "mariadb" ? download : null;
+  const rows: string[] = [];
+
+  if (!db.installed) {
+    rows.push(`<div class="path-row">
+      <span class="catalog-version">${esc(db.label)}</span>
+      <span class="tag">belum</span>
+      <span class="hint">server database lokal, port ${db.port}</span>
+      <span class="spacer"></span>
+      ${
+        job
+          ? `<span class="catalog-progress">
+              <span class="progress"><span style="width:${percentOf(job)}%"></span></span>
+              <span class="hint">${esc(stageLabel(job))}</span>
+              <button class="btn btn-quiet" type="button" data-action="cancel-download">Batal</button>
+            </span>`
+          : `<button class="btn" type="button" data-action="install-database" ${
+              download ? "disabled" : ""
+            }>Pasang</button>`
+      }
+    </div>`);
+    return rows.join("");
+  }
+
+  const live = db.status === "ready";
+  rows.push(`<div class="path-row">
+    <span class="catalog-version">${esc(db.label)} ${esc(db.version)}</span>
+    <span class="tag">${live ? "hidup" : STATUS_WORD[db.status] ?? "berhenti"}</span>
+    <span class="hint">${esc(db.data_path)}</span>
+    <span class="spacer"></span>
+    ${
+      live
+        ? `<button class="btn btn-quiet" type="button" data-action="stop-database" ${
+            busy ? "disabled" : ""
+          }>Stop</button>`
+        : `<button class="btn btn-quiet" type="button" data-action="start-database" ${
+            busy ? "disabled" : ""
+          }>Mulai</button>`
+    }
+    <button class="btn btn-quiet btn-danger" type="button" data-action="ask-remove-database" ${
+      busy ? "disabled" : ""
+    }>Hapus</button>
+  </div>`);
+
+  if (db.detail) {
+    rows.push(`<p class="field-error">${esc(db.detail)}</p>`);
+  }
+
+  rows.push(`<div class="path-row">
+    <span class="catalog-version">Koneksi</span>
+    <code class="path-value">127.0.0.1:${db.port}</code>
+    <span class="hint">user root${db.has_password ? ", password diatur" : ", tanpa password"}</span>
+    <span class="spacer"></span>
+    <button class="btn btn-quiet" type="button" data-action="reset-db-password" ${
+      busy || !snapshot?.running ? "disabled" : ""
+    }>Atur password</button>
+  </div>`);
+
+  rows.push(`<div class="path-row">
+    <span class="catalog-version">Nyalakan otomatis</span>
+    ${db.autostart ? '<span class="tag">aktif</span>' : '<span class="tag">tidak</span>'}
+    <span class="hint">Ikut menyala saat service jalan dan mati saat Stop semua.</span>
+    <span class="spacer"></span>
+    <button class="btn btn-quiet" type="button" data-action="toggle-db-autostart" ${
+      busy ? "disabled" : ""
+    }>${db.autostart ? "Matikan" : "Aktifkan"}</button>
+  </div>`);
+
+  return rows.join("");
 }
 
 function bindRuntime(): void {
@@ -1447,6 +1554,8 @@ function renderDetail(): void {
         ${renderPhpSettings()}
         <div class="log-head"><h3>Pasang versi</h3></div>
         <div id="php-catalog">${renderPhpCatalog()}</div>
+        <div class="log-head"><h3>Database</h3></div>
+        <div id="database-panel">${renderDatabase()}</div>
         ${renderConfigSection()}
       </div>`;
     bindRuntime();
@@ -2028,6 +2137,155 @@ function summarizeRemoval(removal: PhpRemoval): string {
   return parts.join(" ");
 }
 
+async function installDatabase(): Promise<void> {
+  notice = null;
+  infoNotice = null;
+  download = { target: "mariadb", version: "", received: 0, total: null, stage: "daftar" };
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("install_database");
+    applySnapshot(next);
+    infoNotice = "MariaDB terpasang dan siap dipakai.";
+  } catch (err) {
+    notice = `Gagal memasang MariaDB: ${String(err)}`;
+  } finally {
+    download = null;
+    render();
+  }
+}
+
+async function databaseAction(command: string): Promise<void> {
+  busy = "database";
+  notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>(command);
+    applySnapshot(next);
+  } catch (err) {
+    notice = `Gagal mengubah database: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function toggleDatabaseAutostart(): Promise<void> {
+  const enabled = !(snapshot?.database.autostart ?? false);
+  busy = "database";
+  notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("set_database_autostart", { enabled });
+    applySnapshot(next);
+  } catch (err) {
+    notice = `Gagal mengubah autostart database: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function resetDatabasePassword(): Promise<void> {
+  const answer = await openDialog({
+    title: "Atur password root",
+    body: "Password berlaku untuk semua akun root. Kosongkan untuk kembali tanpa password.",
+    fields: [
+      {
+        id: "password",
+        label: "Password baru",
+        type: "password",
+        placeholder: "kosong berarti tanpa password",
+      },
+    ],
+    choices: [{ id: "save", label: "Simpan", variant: "primary" }],
+  });
+  if (answer?.choice !== "save") return;
+
+  const password = answer.values.password ?? "";
+  busy = "database";
+  notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("reset_database_password", { password });
+    applySnapshot(next);
+    infoNotice = password ? "Password root diperbarui." : "Password root dikosongkan.";
+  } catch (err) {
+    notice = `Gagal mengubah password root: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function askRemoveDatabase(): Promise<void> {
+  const db = snapshot?.database;
+  if (!db) return;
+
+  const canBackup = Boolean(snapshot?.running && db.installed && db.initialized);
+  const checkboxes: DialogCheckbox[] = [
+    {
+      id: "data",
+      label: "Hapus juga data",
+      hint: "Database dan tabel di folder data ikut terhapus.",
+    },
+  ];
+  if (canBackup) {
+    checkboxes.push({
+      id: "backup",
+      label: "Backup dulu ke file .sql",
+      hint: "Semua database buatan user disimpan ke folder backup DevKu.",
+      checked: true,
+      requires: "data",
+    });
+  }
+
+  const answer = await openDialog({
+    title: `Hapus ${db.label}?`,
+    body: canBackup
+      ? "Binari dihapus dari disk. Folder project tidak disentuh."
+      : "Binari dihapus dari disk. Backup belum bisa dibuat karena service belum berjalan.",
+    rows: [
+      { label: "Versi", value: db.version },
+      { label: "Folder data", value: db.data_path },
+    ],
+    checkboxes,
+    choices: [{ id: "remove", label: "Hapus", variant: "danger" }],
+    tone: "danger",
+  });
+  if (answer?.choice !== "remove") return;
+
+  busy = "database";
+  notice = null;
+  render();
+
+  try {
+    const result = await invoke<DatabaseRemovalResponse>("remove_database", {
+      removeData: Boolean(answer.checked.data),
+      backup: Boolean(answer.checked.backup),
+    });
+    applySnapshot(result.snapshot);
+
+    if (result.backup) {
+      infoNotice = `${db.label} dihapus. Backup disimpan di ${result.backup}.`;
+      // Folder backup dibuka supaya berkasnya langsung terlihat.
+      await invoke<string>("open_backups").catch(() => "");
+    } else if (result.removal.removed_data) {
+      infoNotice = `${db.label} dan datanya dihapus.`;
+    } else {
+      infoNotice = `${db.label} dihapus. Data tetap disimpan di ${db.data_path}.`;
+    }
+  } catch (err) {
+    notice = `Gagal menghapus ${db.label}: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
 /* ---------------------------------------------------------------- misc */
 
 function slug(value: string): string {
@@ -2134,6 +2392,24 @@ document.addEventListener("click", (event) => {
       if (version) void askRemovePhp(version);
       break;
     }
+    case "install-database":
+      void installDatabase();
+      break;
+    case "start-database":
+      void databaseAction("start_database");
+      break;
+    case "stop-database":
+      void databaseAction("stop_database");
+      break;
+    case "toggle-db-autostart":
+      void toggleDatabaseAutostart();
+      break;
+    case "reset-db-password":
+      void resetDatabasePassword();
+      break;
+    case "ask-remove-database":
+      void askRemoveDatabase();
+      break;
     case "refresh-log":
       if (selectedId) void loadLog(selectedId);
       break;

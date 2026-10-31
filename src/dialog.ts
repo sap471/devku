@@ -91,9 +91,9 @@ export function openDialog(spec: DialogSpec): Promise<DialogOutcome | null> {
       .map((box) => {
         const gate = box.requires ? ` hidden data-requires="${esc(box.requires)}"` : "";
         return `<label class="dialog-check" data-check-row="${esc(box.id)}"${gate}>
-          <input type="checkbox" data-check="${esc(box.id)}"${
-            box.checked ? " checked" : ""
-          } />
+          <input type="checkbox" data-check="${esc(box.id)}" data-default="${
+            box.checked ? "true" : "false"
+          }"${box.checked ? " checked" : ""} />
           <span>
             <span class="dialog-check-label">${esc(box.label)}</span>
             ${box.hint ? `<span class="hint">${esc(box.hint)}</span>` : ""}
@@ -167,11 +167,13 @@ export function openDialog(spec: DialogSpec): Promise<DialogOutcome | null> {
       for (const row of dialog.querySelectorAll<HTMLElement>("[data-requires]")) {
         const parent = row.dataset.requires!;
         const gate = dialog.querySelector<HTMLInputElement>(`[data-check="${parent}"]`);
+        const own = row.querySelector<HTMLInputElement>("[data-check]");
         const hidden = !gate?.checked;
         row.hidden = hidden;
-        if (hidden) {
-          const own = row.querySelector<HTMLInputElement>("[data-check]");
-          if (own && own !== gate) own.checked = false;
+        // Ceklis bertingkat kembali ke keadaan awalnya saat induknya dicentang
+        // lagi, bukan tetap mati karena sempat disembunyikan.
+        if (own && own !== gate) {
+          own.checked = hidden ? false : own.dataset.default === "true";
         }
       }
     };

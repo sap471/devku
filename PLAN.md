@@ -87,6 +87,7 @@ Empat spike dijalankan tanpa hak admin. Detail di [`docs/spike-fase-0.md`](docs/
 | 2019 | Caddy admin API | loopback | untuk reload config tanpa restart |
 | 8080 | Apache | loopback | hanya saat backend apache aktif |
 | 9001+ | php-cgi per versi | loopback | satu port per versi, pool via `PHP_FCGI_CHILDREN` |
+| 3306 | MariaDB | loopback | port bisa diubah di `config.json`, sengaja tidak digeser otomatis |
 
 ### Mengapa Caddy, bukan Nginx/Apache sebagai default
 
@@ -330,6 +331,22 @@ Deliverable:
 - Halaman rilis berisi hash dan catatan perubahan, supaya unduhan bisa diverifikasi.
 
 Selesai bila: installer jalan di mesin Windows bersih tanpa langkah manual, dan versi lama bisa memperbarui diri lewat tanda tangan yang valid.
+
+---
+
+### Fase 7 — Database lokal (selesai, MariaDB)
+
+MariaDB 11.4.13 LTS dipatok di kode, diunduh dari `archive.mariadb.org`, dan diverifikasi lewat `sha256sums.txt`. Binari di `engines/mariadb`, data di `databases/mariadb`, sehingga memasang ulang binari tidak menyentuh database.
+
+Deliverable:
+- [x] Panel Database di dasbor: pasang, mulai, stop, autostart, atur password root, hapus.
+- [x] Password root disimpan di `runtime/mariadb/root.pass`, terpisah dari `config.json` supaya tidak ikut ter-ekspor.
+- [x] Server berjalan lewat supervisor yang sama dengan Caddy dan php-cgi, jadi ikut mati saat DevKu keluar.
+- [x] Hapus dengan ceklis data dan backup `.sql` otomatis ke `backups/`.
+- [x] `mariadb` dan `mariadb-dump` tersedia di terminal DevKu.
+- PostgreSQL: implementasi lain dari trait `DatabaseBackend`, belum dikerjakan.
+
+Selesai bila: situs bisa memakai `DB_HOST=127.0.0.1` dengan port dari config tanpa langkah manual.
 
 ---
 

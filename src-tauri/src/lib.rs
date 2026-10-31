@@ -5,6 +5,7 @@ pub mod caddy;
 pub mod commands;
 pub mod composer;
 pub mod config;
+pub mod database;
 pub mod detect;
 pub mod download;
 pub mod hosts;
@@ -95,6 +96,13 @@ pub fn run() {
             commands::restart_php,
             commands::remove_php,
             commands::remove_all_php,
+            commands::install_database,
+            commands::start_database,
+            commands::stop_database,
+            commands::set_database_autostart,
+            commands::reset_database_password,
+            commands::remove_database,
+            commands::open_backups,
             commands::install_caddy,
             commands::install_bun,
             commands::install_composer,

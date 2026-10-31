@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, Site};
+use crate::database::{DatabaseBackend, Mariadb};
 use crate::detect;
 use crate::paths::Paths;
 use crate::proc::ServiceState;
@@ -62,6 +63,29 @@ pub struct PhpRemoval {
     pub removed_all: bool,
 }
 
+/// Keadaan server database lokal. Cukup untuk merender panel tanpa memanggil
+/// perintah lain.
+#[derive(Clone, Debug, Serialize)]
+pub struct DatabaseView {
+    pub engine: String,
+    pub label: String,
+    pub version: String,
+    pub installed: bool,
+    pub initialized: bool,
+    pub port: u16,
+    pub autostart: bool,
+    pub status: String,
+    pub detail: Option<String>,
+    pub data_path: String,
+    pub bin_path: String,
+    pub has_password: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DatabaseRemoval {
+    pub removed_data: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub tld: String,
@@ -91,6 +115,8 @@ pub struct Snapshot {
     pub start_at_login: bool,
     pub sites: Vec<SiteView>,
     pub services: Vec<ServiceView>,
+    /// Server database lokal, termasuk saat belum terpasang.
+    pub database: DatabaseView,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -210,6 +236,30 @@ impl Session {
 
         let composer = crate::composer::status(&self.paths);
 
+        let database_backend = Mariadb::new(self.paths.clone());
+        let database_service = services
+            .iter()
+            .find(|item| item.name == "mariadb")
+            .map(|item| (item.status.clone(), item.detail.clone()));
+
+        let database = DatabaseView {
+            engine: database_backend.id().to_string(),
+            label: database_backend.label().to_string(),
+            version: database_backend.version().to_string(),
+            installed: database_backend.is_installed(),
+            initialized: database_backend.is_initialized(),
+            port: self.config.database.port,
+            autostart: self.config.database.autostart,
+            status: database_service
+                .as_ref()
+                .map(|(status, _)| status.clone())
+                .unwrap_or_else(|| "stopped".to_string()),
+            detail: database_service.and_then(|(_, detail)| detail),
+            data_path: database_backend.data_dir().to_string_lossy().to_string(),
+            bin_path: database_backend.bin_dir().to_string_lossy().to_string(),
+            has_password: !database_backend.password().is_empty(),
+        };
+
         Snapshot {
             tld: self.config.tld.clone(),
             running: self.runtime.is_some(),
@@ -231,6 +281,7 @@ impl Session {
             start_at_login: crate::autostart::is_enabled(&crate::autostart::running_exe()),
             sites,
             services,
+            database,
         }
     }
 
@@ -468,6 +519,172 @@ impl Session {
         crate::composer::set_php(&self.paths, &php).is_ok()
     }
 
+    /// Menyiapkan datadir MariaDB. Dipanggil setelah binari selesai diekstrak,
+    /// dan aman diulang.
+    pub async fn prepare_database(&mut self) -> Result<()> {
+        let backend = Mariadb::new(self.paths.clone());
+        if !backend.is_installed() {
+            bail!("MariaDB belum terpasang");
+        }
+
+        backend.initialize(self.config.database.port)?;
+        if !self.paths.mariadb_password().exists() {
+            backend.store_password("")?;
+        }
+
+        if self.config.database.autostart && self.runtime.is_some() {
+            self.start_database().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn start_database(&mut self) -> Result<()> {
+        let backend = Mariadb::new(self.paths.clone());
+        if !backend.is_installed() {
+            bail!("MariaDB belum terpasang");
+        }
+
+        // Binari bisa datang tanpa datadir, misalnya setelah folder data
+        // dibersihkan. Menyiapkan di sini membuat tombol Mulai selalu bekerja.
+        backend.initialize(self.config.database.port)?;
+        if !self.paths.mariadb_password().exists() {
+            backend.store_password("")?;
+        }
+
+        let Some(runtime) = self.runtime.as_mut() else {
+            bail!("service belum berjalan");
+        };
+        let port = self.config.database.port;
+        runtime
+            .ensure_database(port, &self.paths, self.hook.clone())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn stop_database(&mut self) -> Result<()> {
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.stop_database().await;
+        }
+        Ok(())
+    }
+
+    /// Ceklis autostart menentukan apakah database ikut hidup dan mati bersama
+    /// service lain.
+    pub async fn set_database_autostart(&mut self, enabled: bool) -> Result<()> {
+        self.config.database.autostart = enabled;
+        self.config.save(&self.paths)?;
+
+        if enabled {
+            if self.runtime.is_some() {
+                self.start_database().await?;
+            }
+        } else {
+            self.stop_database().await?;
+        }
+        Ok(())
+    }
+
+    /// Mengubah password root di semua akun root. Kalau catatan password DevKu
+    /// sudah basi, server dinyalakan ulang tanpa grant table sebentar.
+    pub async fn reset_database_password(&mut self, password: &str) -> Result<()> {
+        let backend = Mariadb::new(self.paths.clone());
+        if !backend.is_installed() || !backend.is_initialized() {
+            bail!("database belum siap");
+        }
+        if self.runtime.is_none() {
+            bail!("service belum berjalan");
+        }
+
+        let port = self.config.database.port;
+        let current = backend.password();
+        let direct = backend.set_password(port, &current, password).is_ok();
+
+        if !direct {
+            let recovery = backend.recovery_spec(port)?;
+            let hook = self.hook.clone();
+            self.runtime
+                .as_mut()
+                .expect("runtime sudah dicek")
+                .start_database_spec(recovery, hook)
+                .await?;
+
+            let result = backend.set_password(port, "", password);
+
+            if let Ok(spec) = backend.spec(port) {
+                let hook = self.hook.clone();
+                let _ = self
+                    .runtime
+                    .as_mut()
+                    .expect("runtime masih ada")
+                    .start_database_spec(spec, hook)
+                    .await;
+            }
+
+            result?;
+        }
+
+        backend.store_password(password)?;
+        Ok(())
+    }
+
+    /// Backup semua database buatan user ke berkas .sql bertanggal.
+    pub async fn backup_database(&mut self) -> Result<PathBuf> {
+        let backend = Mariadb::new(self.paths.clone());
+        if !backend.is_installed() || !backend.is_initialized() {
+            bail!("database belum siap");
+        }
+        if self.runtime.is_none() {
+            bail!("service belum berjalan");
+        }
+
+        let running = self
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.database_running())
+            .unwrap_or(false);
+        if !running {
+            self.start_database().await?;
+        }
+
+        let port = self.config.database.port;
+        let password = backend.password();
+        let dest = self
+            .paths
+            .backups()
+            .join(format!("mariadb-{}.sql", timestamp()));
+        let target = dest.clone();
+
+        tokio::task::spawn_blocking(move || backend.dump(port, &password, &target))
+            .await
+            .map_err(|err| anyhow::anyhow!("backup terhenti: {err}"))??;
+
+        Ok(dest)
+    }
+
+    /// Menghapus binari MariaDB. Data hanya ikut terhapus kalau diminta.
+    pub async fn remove_database(&mut self, remove_data: bool) -> Result<DatabaseRemoval> {
+        let backend = Mariadb::new(self.paths.clone());
+        if !backend.is_installed() && !backend.is_initialized() {
+            bail!("MariaDB belum terpasang");
+        }
+
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.stop_database().await;
+        }
+
+        remove_dir_retry(&self.paths.mariadb_dir())?;
+        let _ = std::fs::remove_file(self.paths.mariadb_password());
+        let _ = std::fs::remove_file(self.paths.mariadb_config());
+
+        if remove_data {
+            backend.wipe()?;
+        }
+
+        Ok(DatabaseRemoval {
+            removed_data: remove_data,
+        })
+    }
+
     pub async fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<()> {
         let site = self
             .config
@@ -662,19 +879,22 @@ fn folder_name(path: &Path) -> String {
 /// Windows kadang masih memegang handle sebentar setelah proses mati, jadi
 /// penghapusan dicoba beberapa kali sebelum menyerah.
 fn remove_php_dir(paths: &Paths, version: &str) -> Result<()> {
-    let dir = paths.php_dir(version);
+    remove_dir_retry(&paths.php_dir(version))
+}
+
+fn remove_dir_retry(dir: &Path) -> Result<()> {
     if !dir.exists() {
         return Ok(());
     }
 
     let mut last: Option<std::io::Error> = None;
     for attempt in 0..5 {
-        match std::fs::remove_dir_all(&dir) {
+        match std::fs::remove_dir_all(dir) {
             Ok(()) => return Ok(()),
             Err(err) => {
                 last = Some(err);
                 if attempt < 4 {
-                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    std::thread::sleep(std::time::Duration::from_millis(300));
                 }
             }
         }
@@ -682,6 +902,28 @@ fn remove_php_dir(paths: &Paths, version: &str) -> Result<()> {
 
     let err = last.expect("setiap percobaan mengisi galat terakhir");
     Err(anyhow::Error::from(err)).with_context(|| format!("gagal menghapus {}", dir.display()))
+}
+
+/// Nama berkas backup memakai waktu lokal mesin, bukan UTC, supaya mudah dicari.
+#[cfg(windows)]
+fn timestamp() -> String {
+    use windows::Win32::Foundation::SYSTEMTIME;
+    use windows::Win32::System::SystemInformation::GetLocalTime;
+
+    let now: SYSTEMTIME = unsafe { GetLocalTime() };
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond
+    )
+}
+
+#[cfg(not(windows))]
+fn timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    secs.to_string()
 }
 
 /// Id dipakai sebagai nama file log dan bagian domain, jadi dibatasi ke huruf,
@@ -758,6 +1000,54 @@ mod tests {
 
         session.set_default_php("7.4.33").unwrap();
         assert_eq!(session.config().php.active, "7.4.33");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn removing_php_disables_the_sites_that_used_it() {
+        let root = std::env::temp_dir().join(format!("devku-remove-php-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+
+        for version in ["8.2.0", "8.3.0"] {
+            let dir = paths.php_dir(version);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("php-cgi.exe"), b"").unwrap();
+        }
+
+        let project = root.join("app");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let mut config = Config::default();
+        config.php.active = "8.2.0".to_string();
+        config.sites.push(Site {
+            id: "app".to_string(),
+            name: "App".to_string(),
+            path: project.clone(),
+            domain: "app.localhost".to_string(),
+            php: "8.2.0".to_string(),
+            root: Some(project),
+            framework: None,
+            backend: None,
+            enabled: true,
+        });
+        config.save(&paths).unwrap();
+
+        let mut session = Session::new(paths.clone(), None).unwrap();
+        let removal = session.remove_php("8.2.0").await.unwrap();
+
+        assert_eq!(removal.disabled_sites, vec!["App".to_string()]);
+        assert!(!removal.removed_all);
+        assert!(
+            !paths.php_dir("8.2.0").exists(),
+            "folder versi yang dihapus harus hilang"
+        );
+        assert!(paths.php_dir("8.3.0").exists(), "versi lain tidak disentuh");
+        assert!(!session.config().sites[0].enabled);
+        assert_eq!(session.config().php.active, "8.3.0");
+        assert_eq!(removal.default_php, "8.3.0");
 
         let _ = std::fs::remove_dir_all(&root);
     }

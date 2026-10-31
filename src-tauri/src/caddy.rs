@@ -420,6 +420,7 @@ mod tests {
                 active: "8.3.36".to_string(),
                 children: 4,
             },
+            database: Default::default(),
             sites: vec![
                 Site {
                     id: "app-a".to_string(),
