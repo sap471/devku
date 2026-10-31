@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { openDialog } from "./dialog";
 import { formatBytes, formatDuration, parseAccessLog, statusTone } from "./log-format";
 import type { AccessLog } from "./log-format";
 import * as terminalPanel from "./terminal";
@@ -141,7 +142,6 @@ let bootError: string | null = null;
 let notice: string | null = null;
 let busy: string | null = null;
 let selectedId: string | null = null;
-let pendingRemove: string | null = null;
 let wizard: Wizard | null = null;
 
 let logFor: string | null = null;
@@ -820,11 +820,14 @@ async function importConfig(): Promise<void> {
   });
   if (typeof path !== "string") return;
 
-  const lanjut = await confirm(
-    "Impor akan mengganti daftar situs, PHP default, dan TLD di mesin ini. Folder project tidak disentuh. Lanjut?",
-    { title: "Impor config", kind: "warning", okLabel: "Impor", cancelLabel: "Batal" },
-  );
-  if (!lanjut) return;
+  const answer = await openDialog({
+    title: "Impor config",
+    body: "Impor mengganti daftar situs, PHP default, dan TLD di mesin ini. Folder project tidak disentuh. Situs yang foldernya tidak ada akan dilewati.",
+    rows: [{ label: "Berkas", value: path }],
+    choices: [{ id: "import", label: "Impor", variant: "primary" }],
+    tone: "warning",
+  });
+  if (answer?.choice !== "import") return;
 
   busy = "import-config";
   notice = null;
@@ -1196,19 +1199,12 @@ function renderList(): void {
             }</span>
           </button>
           <span class="row-actions">
-            ${
-              pendingRemove === site.id
-                ? `<button class="btn btn-quiet btn-danger" type="button" data-action="confirm-remove" data-id="${esc(
-                    site.id,
-                  )}">Hapus permanen?</button>
-                   <button class="btn btn-quiet" type="button" data-action="cancel-remove">Batal</button>`
-                : `<button class="btn btn-quiet" type="button" data-action="toggle-site" data-id="${esc(
-                    site.id,
-                  )}">${site.enabled ? "Matikan" : "Aktifkan"}</button>
-                   <button class="btn btn-quiet" type="button" data-action="ask-remove" data-id="${esc(
-                     site.id,
-                   )}">Hapus</button>`
-            }
+            <button class="btn btn-quiet" type="button" data-action="toggle-site" data-id="${esc(
+              site.id,
+            )}">${site.enabled ? "Matikan" : "Aktifkan"}</button>
+            <button class="btn btn-quiet" type="button" data-action="ask-remove" data-id="${esc(
+              site.id,
+            )}">Hapus</button>
           </span>
         </div>`;
     })
@@ -1654,7 +1650,6 @@ function bindWizard(): void {
 /* -------------------------------------------------------------- actions */
 
 function openWizard(): void {
-  pendingRemove = null;
   notice = null;
   wizard = {
     step: 1,
@@ -1835,11 +1830,29 @@ async function toggleSite(id: string): Promise<void> {
   }
 }
 
+async function askRemoveSite(id: string): Promise<void> {
+  const site = snapshot?.sites.find((item) => item.id === id);
+  if (!site) return;
+
+  const answer = await openDialog({
+    title: `Hapus situs ${site.name}?`,
+    body: "Situs dihapus dari daftar dan berhenti dilayani. Folder project tidak disentuh.",
+    rows: [
+      { label: "Domain", value: site.domain },
+      { label: "PHP", value: site.php },
+      { label: "Folder", value: site.root },
+    ],
+    choices: [{ id: "remove", label: "Hapus situs", variant: "danger" }],
+    tone: "danger",
+  });
+  if (answer?.choice !== "remove") return;
+  void removeSite(id);
+}
+
 async function removeSite(id: string): Promise<void> {
   busy = "remove";
   try {
     const next = await invoke<Snapshot>("remove_site", { id });
-    pendingRemove = null;
     applySnapshot(next);
     if (selectedId === id) selectedId = null;
     render();
@@ -1911,7 +1924,6 @@ document.addEventListener("click", (event) => {
     case "dashboard":
       selectedId = null;
       logFor = null;
-      pendingRemove = null;
       openMenuFor = null;
       render();
       break;
@@ -1919,7 +1931,6 @@ document.addEventListener("click", (event) => {
       if (id) {
         selectedId = id;
         logFor = null;
-        pendingRemove = null;
         openMenuFor = null;
         render();
       }
@@ -1942,15 +1953,7 @@ document.addEventListener("click", (event) => {
       if (id) void toggleSite(id);
       break;
     case "ask-remove":
-      pendingRemove = id ?? null;
-      render();
-      break;
-    case "confirm-remove":
-      if (id) void removeSite(id);
-      break;
-    case "cancel-remove":
-      pendingRemove = null;
-      render();
+      if (id) void askRemoveSite(id);
       break;
     case "refresh-log":
       if (selectedId) void loadLog(selectedId);
