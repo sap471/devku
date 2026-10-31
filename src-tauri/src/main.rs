@@ -13,6 +13,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("-h" | "--help" | "help") => {
+            devku_lib::console::attach_for_cli();
             devku_lib::cli::print_help();
             ExitCode::SUCCESS
         }
