@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { formatBytes, formatDuration, parseAccessLog, statusTone } from "./log-format";
+import type { AccessLog } from "./log-format";
 import * as terminalPanel from "./terminal";
 
 type Status = "starting" | "ready" | "backoff" | "failed" | "stopped";
@@ -713,9 +715,43 @@ function paintLog(): void {
     return;
   }
 
+  let lastDate = "";
   node.className = "log";
-  node.textContent = logLines.join("\n");
+  node.innerHTML = logLines
+    .map((line) => {
+      const entry = parseAccessLog(line);
+      if (!entry) {
+        const raw = line.length > 500 ? `${line.slice(0, 500)}...` : line;
+        return `<div class="log-raw">${esc(raw)}</div>`;
+      }
+
+      // Tanggal hanya ditulis sekali per kelompok supaya kolom jam tetap sempit.
+      const head =
+        entry.date === lastDate
+          ? ""
+          : `<div class="log-date">${esc(entry.date)}</div>`;
+      lastDate = entry.date;
+      return head + renderLogRow(entry);
+    })
+    .join("");
   node.scrollTop = node.scrollHeight;
+}
+
+function renderLogRow(entry: AccessLog): string {
+  const meta = [
+    entry.durationMs === null ? "" : formatDuration(entry.durationMs),
+    entry.size === null ? "" : formatBytes(entry.size),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return `<div class="log-row">
+    <span class="log-time">${esc(entry.time)}</span>
+    <span class="log-status" data-tone="${statusTone(entry.status)}">${entry.status}</span>
+    <span class="log-method">${esc(entry.method)}</span>
+    <span class="log-uri">${esc(entry.uri)}</span>
+    <span class="log-meta">${esc(meta)}</span>
+  </div>`;
 }
 
 /* -------------------------------------------------------------- render */
@@ -969,6 +1005,7 @@ function renderDetail(): void {
     )
     .join("");
   const phpMissing = !installed.includes(site.php);
+  const canOpen = site.enabled && site.status === "ready";
 
   const phpField = installed.length
     ? `<div class="field">
@@ -992,7 +1029,19 @@ function renderDetail(): void {
     </div>
     <div class="detail-body">
       <dl class="facts">
-        <dt>Domain</dt><dd>${esc(site.domain)}</dd>
+        <dt>Domain</dt>
+        <dd class="domain-cell">
+          <span>${esc(site.domain)}</span>
+          <span class="domain-links">
+            <button class="btn btn-quiet" type="button" data-action="open-site" data-url="http://${esc(
+              site.domain,
+            )}" aria-label="Buka http://${esc(site.domain)}" ${canOpen ? "" : "disabled"}>http</button>
+            <button class="btn btn-quiet" type="button" data-action="open-site" data-url="https://${esc(
+              site.domain,
+            )}" aria-label="Buka https://${esc(site.domain)}" ${canOpen ? "" : "disabled"}>https</button>
+          </span>
+          ${canOpen ? "" : '<span class="hint">situs belum siap</span>'}
+        </dd>
         <dt>Framework</dt><dd>${esc(frameworkLabel(site.framework))}</dd>
         <dt>Port</dt><dd>${site.port ? `127.0.0.1:${site.port}` : "-"}</dd>
         <dt>Folder</dt><dd>${esc(site.root)}</dd>
@@ -1014,9 +1063,10 @@ function renderDetail(): void {
 
       <div class="log-head">
         <h3>Log</h3>
+        <span class="hint">200 baris terakhir</span>
         <button class="btn" type="button" data-action="refresh-log">Muat ulang</button>
       </div>
-      <pre class="log log-empty" id="log"></pre>
+      <div class="log log-empty" id="log"></div>
     </div>`;
 
   bindSiteDetail(site);
@@ -1509,6 +1559,11 @@ document.addEventListener("click", (event) => {
     case "open-dashboard":
       void openUrl("http://localhost/");
       break;
+    case "open-site": {
+      const url = target.dataset.url;
+      if (url) void openUrl(url);
+      break;
+    }
     case "toggle-terminal": {
       const active = snapshot?.sites.find((site) => site.id === selectedId);
       terminalPanel.toggle(active?.root ?? null);

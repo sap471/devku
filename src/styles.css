@@ -409,6 +409,24 @@ body {
   word-break: break-all;
 }
 
+.facts dd.domain-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  word-break: normal;
+}
+
+.domain-links {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.domain-links .btn {
+  height: 24px;
+  font-size: 11.5px;
+}
+
 .log-head {
   display: flex;
   align-items: center;
@@ -434,14 +452,14 @@ body {
   min-height: 120px;
   max-height: 320px;
   overflow: auto;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--bg);
   font-family: var(--font-mono);
   font-size: 11.5px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: 1.55;
+  white-space: normal;
   word-break: break-word;
 }
 
@@ -449,6 +467,65 @@ body {
   color: var(--muted);
   font-family: var(--font-sans);
   font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.log-date {
+  margin: 4px 0 2px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.log-date:first-child {
+  margin-top: 0;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 58px 34px 52px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+
+.log-time,
+.log-method,
+.log-meta {
+  color: var(--muted);
+}
+
+.log-time,
+.log-meta {
+  white-space: nowrap;
+}
+
+.log-status {
+  font-weight: 650;
+}
+
+.log-status[data-tone="ok"] {
+  color: var(--ok);
+}
+
+.log-status[data-tone="warn"] {
+  color: var(--accent);
+}
+
+.log-status[data-tone="bad"] {
+  color: var(--bad);
+}
+
+.log-uri {
+  overflow-wrap: anywhere;
+}
+
+.log-raw {
+  padding: 2px 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Wizard ------------------------------------------------------------- */
