@@ -196,7 +196,8 @@ body {
 .shell {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 400px);
+  /* Daftar situs tetap sempit; ruang tambahan dipakai panel info di kanan. */
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
   min-height: 0;
 }
 
