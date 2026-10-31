@@ -61,6 +61,9 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 
 ### Diubah
 
+- Satu binary `devku`: subperintah CLI berjalan sebagai `devku <perintah>`.
+  Tanpa argumen tetap membuka UI, `--hidden` tetap dipakai autostart, dan
+  perintah tidak dikenal kini keluar dengan kode 2. (`6a64b8b`)
 - Config Caddy divalidasi sebelum ditulis, dan reload memakai `POST /load` supaya
   perubahan berlaku atomik tanpa restart. (`76d60bf`)
 - Deteksi PHP menjadi folder-first: `PhpManager::installed()` memindai
@@ -95,6 +98,8 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 
 ### Dilepas
 
+- Binary `devku-cli.exe`. Skrip lama harus memanggil `devku` dengan subperintah
+  yang sama; tidak ada alias transisi. (`6a64b8b`)
 - Field `php.installed` di config, diganti pemindaian folder `engines/php`.
   (`6eaa4f9`)
 
