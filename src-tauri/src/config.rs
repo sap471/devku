@@ -77,6 +77,10 @@ pub struct Config {
     /// live, jadi tombol Percayai tetap boleh dijalankan ulang kapan saja.
     #[serde(default)]
     pub https_trusted: bool,
+    /// First-run sudah selesai atau dilewati. Config lama tanpa field ini
+    /// dianggap belum, tetapi onboarding hanya tampil saat belum ada situs.
+    #[serde(default)]
+    pub onboarded: bool,
     #[serde(default)]
     pub php: PhpSettings,
     #[serde(default)]
@@ -99,6 +103,7 @@ impl Default for Config {
             tld: default_tld(),
             autostart: true,
             https_trusted: false,
+            onboarded: false,
             php: PhpSettings {
                 active: String::new(),
                 children: default_children(),
@@ -201,5 +206,22 @@ mod tests {
     fn autostart_can_be_turned_off() {
         let config: Config = serde_json::from_str(r#"{"autostart":false}"#).unwrap();
         assert!(!config.autostart);
+    }
+
+    #[test]
+    fn old_config_without_onboarded_starts_unonboarded() {
+        let config: Config = serde_json::from_str(r#"{"version":1}"#).unwrap();
+        assert!(!config.onboarded);
+    }
+
+    #[test]
+    fn onboarded_flag_survives_round_trip() {
+        let config = Config {
+            onboarded: true,
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert!(back.onboarded);
     }
 }

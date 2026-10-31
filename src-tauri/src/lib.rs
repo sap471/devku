@@ -82,6 +82,7 @@ pub fn run() {
             commands::install_caddy,
             commands::install_bun,
             commands::install_composer,
+            commands::finish_onboarding,
             commands::enable_composer_global_path,
             commands::disable_composer_global_path,
             commands::site_commands,

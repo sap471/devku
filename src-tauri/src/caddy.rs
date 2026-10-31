@@ -409,6 +409,7 @@ mod tests {
             tld: "localhost".to_string(),
             autostart: true,
             https_trusted: false,
+            onboarded: false,
             php: PhpSettings {
                 active: "8.3.36".to_string(),
                 children: 4,

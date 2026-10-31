@@ -27,6 +27,7 @@ interface Snapshot {
   running: boolean;
   caddy_installed: boolean;
   https_trusted: boolean;
+  onboarded: boolean;
   installed_php: string[];
   default_php: string;
   php_path: PathStatus;
@@ -237,6 +238,9 @@ function paintDownloads(): void {
 
   const binaries = document.getElementById("binaries");
   if (binaries) binaries.innerHTML = renderBinaries();
+
+  const caddy = document.getElementById("onboarding-caddy");
+  if (caddy) caddy.innerHTML = caddyAction();
 }
 
 function percentOf(job: DownloadProgress): number {
@@ -652,8 +656,24 @@ async function installBinary(target: "caddy" | "bun" | "composer"): Promise<void
   }
 }
 
-async function trustCaddy(): Promise<void> {
+/// Menutup panel panduan, baik setelah selesai maupun saat dilewati.
+async function finishOnboarding(): Promise<void> {
+  busy = "onboarding";
   notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("finish_onboarding");
+    applySnapshot(next);
+  } catch (err) {
+    notice = `Gagal menutup panduan: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function trustCaddy(): Promise<void> {  notice = null;
   render();
   try {
     const next = await invoke<Snapshot>("trust_caddy");
@@ -924,8 +944,13 @@ function renderList(): void {
   }
 
   if (!snapshot || snapshot.sites.length === 0) {
-    list.innerHTML = `
-      <div class="state">
+    const firstRun = snapshot !== null && !snapshot.onboarded;
+    list.innerHTML = firstRun
+      ? `<div class="state">
+        <h2>Belum ada situs</h2>
+        <p>Selesaikan panduan di panel kanan untuk menambahkan situs pertama.</p>
+      </div>`
+      : `<div class="state">
         <h2>Belum ada situs</h2>
         <p>Tambahkan folder project. DevKu mengenali Laravel, CodeIgniter 3, CodeIgniter 4, atau PHP biasa dari isi foldernya.</p>
         <button class="btn btn-primary" type="button" data-action="open-wizard">Tambah situs</button>
@@ -987,12 +1012,94 @@ function renderList(): void {
     .join("");
 }
 
+function caddyAction(): string {
+  return snapshot?.caddy_installed
+    ? '<span class="tag">terpasang</span>'
+    : downloadButton("caddy");
+}
+
+/// Panduan saat pertama dibuka. Status tiap langkah dibaca dari snapshot, bukan
+/// disimpan terpisah, jadi tidak bisa basi setelah pemasangan selesai.
+function renderOnboarding(): string {
+  const php = snapshot?.installed_php ?? [];
+  const caddyReady = snapshot?.caddy_installed ?? false;
+  const ready = caddyReady && php.length > 0;
+
+  const httpsRow = snapshot?.https_trusted
+    ? '<p class="hint">HTTPS lokal sudah dipercaya browser.</p>'
+    : `<p class="hint">HTTPS lokal opsional. <button class="btn btn-quiet" type="button" data-action="trust-caddy" ${
+        caddyReady && snapshot?.running ? "" : "disabled"
+      }>Percayai sekarang</button>${
+        caddyReady && snapshot?.running ? "" : ` ${esc(httpsHint())}`
+      }</p>`;
+
+  const phpBody = php.length
+    ? `<div class="onboard-tags">${php
+        .map((version) => `<span class="tag">${esc(version)}</span>`)
+        .join("")}</div>
+       <p class="hint">Versi terbaru dipakai untuk situs baru. Versi lain bisa ditambah dari dasbor.</p>`
+    : `<p class="hint">Belum ada PHP. Pilih satu versi di bawah; DevKu mengunduh lalu memasangnya.</p>
+       <div id="php-catalog">${renderPhpCatalog()}</div>`;
+
+  return `
+    <div class="detail-head"><h2>Mulai</h2></div>
+    <div class="detail-body">
+      <p class="hint onboard-intro">Tiga langkah ini cukup untuk membuka situs pertama. Semua pengaturan tetap bisa diubah dari dasbor.</p>
+
+      <div class="onboard-step" data-done="${caddyReady}">
+        <span class="onboard-num" aria-hidden="true">1</span>
+        <div class="onboard-main">
+          <h3>Web server</h3>
+          <p class="hint">Caddy melayani semua domain di port 80 dan 443, tanpa admin.</p>
+          ${caddyReady ? httpsRow : ""}
+        </div>
+        <span id="onboarding-caddy">${caddyAction()}</span>
+      </div>
+
+      <div class="onboard-step" data-done="${php.length > 0}">
+        <span class="onboard-num" aria-hidden="true">2</span>
+        <div class="onboard-main">
+          <h3>PHP</h3>
+          ${phpBody}
+        </div>
+      </div>
+
+      <div class="onboard-step" data-done="${ready}">
+        <span class="onboard-num" aria-hidden="true">3</span>
+        <div class="onboard-main">
+          <h3>Situs pertama</h3>
+          <p class="hint">${
+            ready
+              ? "Pilih folder project. Laravel, CodeIgniter, dan PHP biasa dikenali otomatis."
+              : "Pasang Caddy dan satu versi PHP dulu, lalu langkah ini terbuka."
+          }</p>
+        </div>
+      </div>
+
+      <div class="onboard-foot">
+        <button class="btn btn-primary" type="button" data-action="open-wizard" ${
+          ready && !busy ? "" : "disabled"
+        }>Tambah situs</button>
+        <button class="btn btn-quiet" type="button" data-action="finish-onboarding" ${
+          busy ? "disabled" : ""
+        }>Lewati panduan</button>
+      </div>
+    </div>`;
+}
+
 function renderDetail(): void {
   const pane = el("detail");
 
   if (wizard) {
     pane.innerHTML = renderWizard();
     bindWizard();
+    if (document.getElementById("php-catalog")) void loadPhpCatalog();
+    return;
+  }
+
+  const firstRun = snapshot !== null && !snapshot.onboarded && snapshot.sites.length === 0;
+  if (firstRun) {
+    pane.innerHTML = renderOnboarding();
     if (document.getElementById("php-catalog")) void loadPhpCatalog();
     return;
   }
@@ -1402,6 +1509,11 @@ async function wizardSubmit(): Promise<void> {
     applySnapshot(next);
     selectedId = next.sites.find((site) => site.domain === submitted)?.id ?? null;
 
+    // Situs pertama menutup panduan, jadi flag-nya tidak tertinggal bohong.
+    if (!next.onboarded) {
+      void invoke<Snapshot>("finish_onboarding").then(applySnapshot).catch(() => {});
+    }
+
     wizard = null;
     busy = null;
     notice = null;
@@ -1504,6 +1616,9 @@ document.addEventListener("click", (event) => {
   switch (action) {
     case "open-wizard":
       openWizard();
+      break;
+    case "finish-onboarding":
+      void finishOnboarding();
       break;
     case "close-wizard":
       wizard = null;

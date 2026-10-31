@@ -626,6 +626,18 @@ pub async fn disable_php_path(state: State<'_, AppState>) -> Result<Snapshot, St
     Ok(session.snapshot().await)
 }
 
+/// Tutup panel first-run, baik setelah selesai maupun dilewati.
+#[tauri::command]
+pub async fn finish_onboarding(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.mark_onboarded().map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
 /// Daftarkan folder paket global Composer ke PATH pengguna, supaya `laravel`
 /// dan tool global lain bisa dipanggil dari terminal mana pun.
 #[tauri::command]

@@ -7,8 +7,8 @@ Development environment untuk PHP di Windows: ringan, multi-PHP per domain, teri
 - [x] **Fase 0** — Fondasi: keputusan arsitektur, scaffold repo, spike teknis → [hasil](docs/spike-fase-0.md)
 - [x] **Fase 1** — Core services: Caddy manager, php-cgi pool + supervisor, port allocator → [hasil](docs/fase-1.md)
 - [x] **Fase 2** — Project manager: UI daftar + wizard + unduh/pasang PHP dari aplikasi
-- [x] **Fase 3** — Runtime integration: deteksi runtime, terminal PTY, script runner, unduh Caddy/Bun → [hasil](docs/fase-3.md)
-- [ ] **Fase 4** — Polish & distribusi: tray, auto-update, installer, SSL trust, export config
+- [x] **Fase 3** — Runtime integration: deteksi runtime, terminal PTY, script runner, unduh Caddy/Bun/Composer → [hasil](docs/fase-3.md)
+- [ ] **Fase 4** — Polish & distribusi: tray dan SSL trust selesai; sisa onboarding, installer NSIS, export config, auto-update, auto-start login
 - [ ] **Fase 5 (v2)** — Pluggable backend: Apache sebagai opsi via Caddy reverse proxy
 
 ---
@@ -165,8 +165,7 @@ Batasan yang disadari: backend Apache (Fase 5) **tidak** memakai supervisor ini 
     "node": { "source": "system", "path": "C:/Program Files/nodejs/node.exe" }
   },
   "php": {
-    "installed": ["8.3.14", "7.4.33"],
-    "active": "8.3.14"
+    "active": "8.3.36"
   },
   "sites": [
     {
@@ -263,17 +262,18 @@ Selesai bila: bisa menyalakan Caddy + 2 versi PHP dari CLI internal, dan `curl h
 
 `Log viewer` digeser ke Fase 2 karena butuh UI; log sudah ditulis per service ke `runtime/logs/`.
 
-### Fase 2 — Project manager
+### Fase 2 — Project manager ✅
 
 Deliverable:
-- UI daftar site: nama, domain, versi PHP, framework, status.
-- Wizard tambah site: pilih folder → deteksi framework → pilih versi PHP → assign domain.
-- Autodetect framework: cari `artisan` (Laravel), `spark` (CI4), `system/` + `index.php` (CI3), fallback PHP polos.
-- Autodetect document root: `public/` untuk Laravel & CI4, root untuk CI3.
-- Folder watcher: menambah folder di root `sites/` otomatis menawarkan pembuatan site.
-- Hapus site: hapus vhost + hosts entry, **jangan** sentuh folder project.
+- [x] UI daftar site: nama, domain, versi PHP, framework, status.
+- [x] Wizard tambah site: pilih folder → deteksi framework → pilih versi PHP → assign domain.
+- [x] Autodetect framework: cari `artisan` (Laravel), `spark` (CI4), `system/` + `index.php` (CI3), fallback PHP polos.
+- [x] Autodetect document root: `public/` untuk Laravel & CI4, root untuk CI3.
+- [x] Hapus site: hapus vhost + hosts entry, **jangan** sentuh folder project.
+- [x] Log viewer per site, diringkas di frontend (`src/log-format.ts`).
+- [ ] Folder watcher: menambah folder di root `sites/` otomatis menawarkan pembuatan site. **Ditunda** ke backlog; belum ada pemantau folder.
 
-Selesai bila: user bisa membuat site Laravel baru dari nol dan membukanya di browser tanpa menyentuh config.
+Selesai bila: user bisa membuat site Laravel baru dari nol dan membukanya di browser tanpa menyentuh config. Terpenuhi lewat wizard, tanpa watcher.
 
 ### Fase 3 — Runtime integration ✅
 
@@ -284,23 +284,28 @@ Deliverable:
 - Script runner: tombol untuk `artisan migrate`, `artisan serve`, `composer install`, dan skrip `package.json`.
 - `bun` sebagai default runner TS: `bun <file>.ts` langsung dari panel situs.
 - Indikator runtime di UI: "Bun 1.2.3 (sistem)" vs "(bawaan)".
+- [x] Installer Composer: unduh `composer.phar` resmi, verifikasi SHA-256, jalankan `--version`, lalu tulis shim `bin/composer.bat`.
+- [x] PATH Composer global: baris status plus tombol daftarkan/lepas folder tool global (`laravel`, `carbon`).
 
 Selesai bila: tidak ada binary ganda saat Bun/Node sudah terpasang, dan TS bisa dijalankan dari UI tanpa langkah setup.
 
-**Terverifikasi:** 64 unit test lulus; unduhan sungguhan untuk PHP 8.3 (SHA-256), Caddy 2.11.7 (SHA-512 dari `checksums.txt`, lalu `caddy version` dijalankan), dan Bun 1.4.4 (`bun --version` dibandingkan dengan tag rilis); pendaftaran `php` ke PATH pengguna diuji naik-turun dengan PATH kembali identik. Detail: [`docs/fase-3.md`](docs/fase-3.md).
+**Terverifikasi:** 76 unit test lulus; unduhan sungguhan untuk PHP 8.3 (SHA-256), Caddy 2.11.7 (SHA-512 dari `checksums.txt`, lalu `caddy version` dijalankan), Bun 1.4.4 (`bun --version` dibandingkan dengan tag rilis), dan Composer 2.11.1; pendaftaran `php` ke PATH pengguna diuji naik-turun dengan PATH kembali identik. Detail: [`docs/fase-3.md`](docs/fase-3.md).
 
 ### Fase 4 — Polish & distribusi
 
 Deliverable:
-- Tray icon: start/stop semua, buka browser, keluar.
-- Auto-start Caddy saat login (opsional, off by default).
-- SSL trust: `caddy trust` dijalankan sekali, status ditampilkan.
-- Auto-update via Tauri updater.
-- Installer NSIS: tanpa PHP binary, unduh on-demand saat pertama pilih versi.
-- Export/import `config.json` untuk berbagi environment antar developer.
-- Onboarding first-run: deteksi runtime + tawaran install Caddy.
+- [x] Tray icon: start/stop semua, buka browser, keluar (`3fcd348`).
+- [x] Tutup jendela menyembunyikan ke tray; keluar dari tray menghentikan service (`3fcd348`).
+- [x] SSL trust: `tls internal` per situs, `caddy trust` sekali, status ditampilkan (`ba46c69`).
+- [ ] Auto-start saat login (opsional, off by default). Catatan: `config.autostart` yang ada sekarang hanya menyalakan service saat aplikasi dibuka, bukan saat Windows login.
+- [ ] Auto-update via Tauri updater.
+- [ ] Installer NSIS: tanpa PHP binary, unduh on-demand saat pertama pilih versi. `bundle.targets` masih `"all"` dan belum pernah diuji di mesin bersih.
+- [ ] Export/import `config.json` untuk berbagi environment antar developer.
+- [ ] Onboarding first-run: deteksi runtime + tawaran install Caddy.
 
 Selesai bila: installer jalan di mesin Windows bersih, first-run selesai tanpa langkah manual.
+
+Urutan sisa: onboarding first-run → installer NSIS → export/import → auto-update → auto-start login.
 
 ### Fase 5 — Pluggable backend (v2)
 

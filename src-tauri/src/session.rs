@@ -57,6 +57,8 @@ pub struct Snapshot {
     pub caddy_installed: bool,
     /// Catatan dari config: CA lokal Caddy pernah dipercaya lewat DevKu.
     pub https_trusted: bool,
+    /// First-run sudah selesai atau dilewati.
+    pub onboarded: bool,
     pub installed_php: Vec<String>,
     /// Versi yang dipakai untuk situs baru dan untuk shim `php` di PATH.
     pub default_php: String,
@@ -184,6 +186,7 @@ impl Session {
             running: self.runtime.is_some(),
             caddy_installed: crate::caddy::CaddyBackend::new(self.paths.clone()).is_installed(),
             https_trusted: self.config.https_trusted,
+            onboarded: self.config.onboarded,
             installed_php: crate::php::PhpManager::new(self.paths.clone()).installed(),
             default_php: self.default_php().unwrap_or_default(),
             php_path: crate::path_env::status(&self.paths),
@@ -351,6 +354,18 @@ impl Session {
     /// sebagai riwayat yang UI pakai untuk menampilkan statusnya.
     pub fn mark_https_trusted(&mut self) -> Result<()> {
         self.config.https_trusted = true;
+        self.config.save(&self.paths)?;
+        Ok(())
+    }
+
+    /// First-run ditutup, baik karena selesai maupun dilewati. Disimpan di
+    /// config supaya panel panduan tidak muncul lagi di peluncuran berikutnya.
+    pub fn mark_onboarded(&mut self) -> Result<()> {
+        if self.config.onboarded {
+            return Ok(());
+        }
+
+        self.config.onboarded = true;
         self.config.save(&self.paths)?;
         Ok(())
     }
