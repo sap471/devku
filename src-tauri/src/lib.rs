@@ -8,6 +8,7 @@ pub mod config;
 pub mod detect;
 pub mod download;
 pub mod hosts;
+pub mod launcher;
 pub mod path_env;
 pub mod paths;
 pub mod php;
@@ -17,6 +18,7 @@ pub mod runtime;
 pub mod runtime_detect;
 pub mod scripts;
 pub mod session;
+pub mod subprocess;
 pub mod terminal;
 pub mod tray;
 
@@ -99,6 +101,8 @@ pub fn run() {
             commands::enable_composer_global_path,
             commands::disable_composer_global_path,
             commands::site_commands,
+            commands::open_targets,
+            commands::open_in,
         ])
         .build(tauri::generate_context!())
         .expect("error while building DevKu");

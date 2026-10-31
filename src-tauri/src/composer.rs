@@ -318,9 +318,10 @@ async fn latest_checksum(client: &Client) -> Result<String> {
 }
 
 async fn phar_version(php: &Path, phar: &Path) -> Result<String> {
-    let output = tokio::process::Command::new(php)
-        .arg(phar)
-        .arg("--version")
+    let mut command = tokio::process::Command::new(php);
+    command.arg(phar).arg("--version");
+    crate::subprocess::hide_console_tokio(&mut command);
+    let output = command
         .output()
         .await
         .with_context(|| format!("gagal menjalankan {}", php.display()))?;

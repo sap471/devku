@@ -8,9 +8,13 @@ use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use tokio::sync::{RwLock, watch};
 
 #[cfg(windows)]
+use process_wrap::tokio::CreationFlags;
+#[cfg(windows)]
 use process_wrap::tokio::JobObject;
 #[cfg(unix)]
 use process_wrap::tokio::ProcessGroup;
+#[cfg(windows)]
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
 /// Batas restart dalam satu jendela waktu. Lewat dari ini, proses dianggap
 /// gagal permanen — lebih baik berhenti dan lapor daripada berputar selamanya.
@@ -310,6 +314,7 @@ fn spawn_once(spec: &ServiceSpec) -> Result<Box<dyn ChildWrapper>> {
     // kalau devku sendiri mati. Unix: process group supaya sinyal menjangkau anak.
     #[cfg(windows)]
     {
+        wrap.wrap(CreationFlags(CREATE_NO_WINDOW));
         wrap.wrap(JobObject);
     }
     #[cfg(unix)]

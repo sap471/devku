@@ -320,13 +320,13 @@ Deliverable:
 
 Selesai bila: satu site `backend: apache` dengan `.htaccess` custom dan satu site `backend: caddy` berjalan bersamaan di port 80, dan Apache mati total saat site Apache dinonaktifkan.
 
-### Fase 6 — Distribusi (nanti)
+### Fase 6 — Distribusi (sebagian selesai)
 
-Dikerjakan setelah ada keputusan rilis: kunci tanda tangan updater, endpoint pembaruan, dan tempat menyimpan berkas installer.
+Installer NSIS sudah dikonfigurasi. Auto-update menunggu keputusan rilis: kunci tanda tangan, endpoint pembaruan, dan tempat menyimpan berkas.
 
 Deliverable:
-- Installer NSIS: `bundle.targets: ["nsis"]`, instalasi per-user tanpa admin, tanpa PHP binary di paket. PHP diunduh saat versi pertama dipilih di UI.
-- Auto-update via Tauri updater: `tauri-plugin-updater`, kunci publik di config, endpoint rilis, dan tampilan versi di UI.
+- [x] Installer NSIS: `bundle.targets: ["nsis"]`, instalasi per-machine dengan default `C:\devku` dan UAC. Tanpa PHP binary di paket. PHP diunduh saat versi pertama dipilih di UI.
+- Auto-update via Tauri updater: `tauri-plugin-updater`, kunci publik di config, endpoint rilis, dan tampilan versi di UI. Ditunda.
 - Halaman rilis berisi hash dan catatan perubahan, supaya unduhan bisa diverifikasi.
 
 Selesai bila: installer jalan di mesin Windows bersih tanpa langkah manual, dan versi lama bisa memperbarui diri lewat tanda tangan yang valid.

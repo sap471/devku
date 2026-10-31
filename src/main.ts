@@ -37,6 +37,7 @@ interface Snapshot {
   composer_php_missing: boolean;
   composer_global: ComposerGlobal;
   config_path: string;
+  home_path: string;
   start_at_login: boolean;
   sites: SiteView[];
   services: ServiceView[];
@@ -67,6 +68,12 @@ interface RuntimeInfo {
   version: string | null;
   source: string;
   path: string | null;
+}
+
+interface OpenTarget {
+  id: string;
+  label: string;
+  available: boolean;
 }
 
 interface PhpCatalogEntry {
@@ -157,6 +164,12 @@ let commandsError: string | null = null;
 /// Hasil ekspor/impor config. Ditampilkan di baris Konfigurasi, bukan banner
 /// galat, karena impor yang berhasil bukan kegagalan.
 let configNotice: string | null = null;
+
+/// Menu "Buka" yang sedang terbuka. Dipisah dari data situs supaya menutup
+/// menu tidak perlu memuat ulang snapshot.
+let openMenuFor: string | null = null;
+let openMenuItems: OpenTarget[] | null = null;
+let openMenuError: string | null = null;
 
 let pollTimer: number | null = null;
 let lastSnapshotJson = "";
@@ -606,6 +619,90 @@ function renderCommands(site: SiteView): string {
     ${buttons ? `<div class="command-row">${buttons}</div>` : ""}
     <div class="command-row">${tsButton}</div>
     ${bunNote}`;
+}
+
+/// Menu "Buka" untuk satu situs. Daftar aplikasi cukup dideteksi sekali;
+/// hasilnya disimpan sampai aplikasi ditutup.
+async function toggleOpenMenu(siteId: string): Promise<void> {
+  if (openMenuFor === siteId) {
+    openMenuFor = null;
+    render();
+    return;
+  }
+
+  openMenuFor = siteId;
+  openMenuError = null;
+  render();
+
+  if (!openMenuItems) {
+    await loadOpenTargets(siteId);
+  } else {
+    focusOpenMenu();
+  }
+}
+
+async function loadOpenTargets(siteId: string): Promise<void> {
+  openMenuItems = null;
+  openMenuError = null;
+  render();
+
+  try {
+    const items = await invoke<OpenTarget[]>("open_targets");
+    if (openMenuFor === siteId) openMenuItems = items;
+  } catch (err) {
+    if (openMenuFor === siteId) openMenuError = String(err);
+  }
+  render();
+  if (openMenuFor === siteId) focusOpenMenu();
+}
+
+function focusOpenMenu(): void {
+  document.querySelector<HTMLElement>(".menu-item:not(:disabled)")?.focus();
+}
+
+function renderOpenMenu(site: SiteView): string {
+  if (openMenuFor !== site.id) return "";
+
+  const body = openMenuError
+    ? `<p class="menu-hint">${esc(openMenuError)}</p>
+       <button class="menu-item" type="button" data-action="reload-open-targets">Coba lagi</button>`
+    : openMenuItems === null
+      ? '<p class="menu-hint">Memeriksa aplikasi yang terpasang...</p>'
+      : openMenuItems
+          .map(
+            (item) =>
+              `<button class="menu-item" type="button" role="menuitem" data-action="open-in" data-target="${esc(
+                item.id,
+              )}" ${item.available ? "" : "disabled"}>${esc(item.label)}${
+                item.available ? "" : '<span class="menu-note">tidak terpasang</span>'
+              }</button>`,
+          )
+          .join("");
+
+  return `<div class="menu" role="menu" aria-label="Buka project">${body}</div>`;
+}
+
+async function runOpen(target: string): Promise<void> {
+  const site = snapshot?.sites.find((item) => item.id === openMenuFor);
+  openMenuFor = null;
+  render();
+  if (!site) return;
+
+  try {
+    await invoke("open_in", { kind: "site", id: site.id, target });
+  } catch (err) {
+    notice = `Gagal membuka ${target}: ${String(err)}`;
+    render();
+  }
+}
+
+async function openDataFolder(): Promise<void> {
+  try {
+    await invoke("open_in", { kind: "data", id: null, target: "explorer" });
+  } catch (err) {
+    notice = `Gagal membuka folder data: ${String(err)}`;
+    render();
+  }
 }
 
 function paintCommands(): void {
@@ -1154,6 +1251,12 @@ function renderConfigSection(): string {
         busy ? "disabled" : ""
       }>Impor</button>
     </div>
+    <div class="path-row">
+      <span class="catalog-version">Folder data</span>
+      <span class="hint config-path">${esc(snapshot?.home_path ?? "")}</span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-action="open-data-folder">Buka folder</button>
+    </div>
     <p class="hint">Impor mengganti daftar situs. Folder project tidak disentuh; situs yang foldernya tidak ada dilewati, dan situs dengan PHP belum terpasang dibuat nonaktif.</p>
     ${status}`;
 }
@@ -1332,6 +1435,13 @@ function renderDetail(): void {
   pane.innerHTML = `
     <div class="detail-head">
       <h2>${esc(site.name)}</h2>
+      <span class="spacer"></span>
+      <div class="menu-wrap">
+        <button class="btn btn-quiet" type="button" data-action="toggle-open-menu" data-id="${esc(
+          site.id,
+        )}" aria-haspopup="menu" aria-expanded="${openMenuFor === site.id}">Buka<span class="caret" aria-hidden="true">▾</span></button>
+        ${renderOpenMenu(site)}
+      </div>
     </div>
     <div class="detail-body">
       <dl class="facts">
@@ -1802,14 +1912,31 @@ document.addEventListener("click", (event) => {
       selectedId = null;
       logFor = null;
       pendingRemove = null;
+      openMenuFor = null;
       render();
       break;
     case "select":
       if (id) {
         selectedId = id;
         logFor = null;
+        pendingRemove = null;
+        openMenuFor = null;
         render();
       }
+      break;
+    case "toggle-open-menu":
+      if (id) void toggleOpenMenu(id);
+      break;
+    case "reload-open-targets":
+      if (openMenuFor) void loadOpenTargets(openMenuFor);
+      break;
+    case "open-in": {
+      const openTarget = target.dataset.target;
+      if (openTarget) void runOpen(openTarget);
+      break;
+    }
+    case "open-data-folder":
+      void openDataFolder();
       break;
     case "toggle-site":
       if (id) void toggleSite(id);
@@ -1912,6 +2039,22 @@ document.addEventListener("click", (event) => {
       render();
       break;
   }
+});
+
+// Klik di luar menu menutupnya. Listener ini dipasang setelah handler utama,
+// jadi klik pada tombol menu sendiri sudah ditangani lebih dulu.
+document.addEventListener("click", (event) => {
+  if (!openMenuFor) return;
+  const node = event.target as HTMLElement | null;
+  if (node?.closest(".menu-wrap")) return;
+  openMenuFor = null;
+  render();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !openMenuFor) return;
+  openMenuFor = null;
+  render();
 });
 
 void listen<DownloadProgress>("download://progress", (event) => {

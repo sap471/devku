@@ -761,6 +761,52 @@ pub async fn site_commands(
         .map_err(|err| err.to_string())
 }
 
+/// Daftar aplikasi untuk membuka folder. Deteksi memanggil `where.exe`, jadi
+/// dijalankan di luar worker async.
+#[tauri::command]
+pub async fn open_targets() -> Result<Vec<crate::launcher::OpenTarget>, String> {
+    tokio::task::spawn_blocking(crate::launcher::targets)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// `kind` hanya "site" (butuh `id`) atau "data". Path tidak datang dari UI,
+/// jadi jendela tidak bisa dipakai membuka folder sembarang.
+#[tauri::command]
+pub async fn open_in(
+    state: State<'_, AppState>,
+    kind: String,
+    id: Option<String>,
+    target: String,
+) -> Result<(), String> {
+    let dir = {
+        let guard = state.session.lock().await;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| unavailable(&state.boot_error))?;
+
+        match kind.as_str() {
+            "data" => session.paths().root.clone(),
+            "site" => {
+                let id = id.ok_or_else(|| "situs tidak dipilih".to_string())?;
+                let site = session
+                    .config()
+                    .sites
+                    .iter()
+                    .find(|site| site.id == id)
+                    .ok_or_else(|| format!("site {id} tidak ditemukan"))?;
+                site.root.clone().unwrap_or_else(|| site.path.clone())
+            }
+            other => return Err(format!("jenis folder tidak dikenal: {other}")),
+        }
+    };
+
+    tokio::task::spawn_blocking(move || crate::launcher::open(&dir, &target))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(error)
+}
+
 #[derive(Serialize)]
 pub struct DetectionView {
     pub framework: String,

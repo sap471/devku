@@ -70,12 +70,15 @@ impl CaddyBackend {
         let candidate = self.paths.runtime().join("Caddyfile.candidate");
         std::fs::write(&candidate, caddyfile)?;
 
-        let output = tokio::process::Command::new(self.binary())
+        let mut command = tokio::process::Command::new(self.binary());
+        command
             .arg("validate")
             .arg("--config")
             .arg(&candidate)
             .arg("--adapter")
-            .arg("caddyfile")
+            .arg("caddyfile");
+        crate::subprocess::hide_console_tokio(&mut command);
+        let output = command
             .output()
             .await
             .with_context(|| format!("gagal menjalankan {}", self.binary().display()))?;
@@ -245,10 +248,13 @@ impl CaddyBackend {
             bail!("Caddy belum terpasang di {}", self.binary().display());
         }
 
-        let output = tokio::process::Command::new(self.binary())
+        let mut command = tokio::process::Command::new(self.binary());
+        command
             .arg("trust")
             .env("XDG_DATA_HOME", self.paths.runtime().as_os_str())
-            .env("XDG_CONFIG_HOME", self.paths.runtime().as_os_str())
+            .env("XDG_CONFIG_HOME", self.paths.runtime().as_os_str());
+        crate::subprocess::hide_console_tokio(&mut command);
+        let output = command
             .output()
             .await
             .with_context(|| format!("gagal menjalankan {}", self.binary().display()))?;

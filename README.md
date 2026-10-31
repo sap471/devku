@@ -14,7 +14,7 @@ Ganti XAMPP/Laragon dengan sesuatu yang lebih kecil dan lebih bisa diatur. Renca
 | 3 | Integrasi runtime (Bun/Node/PHP/Composer) | ✅ [hasil](docs/fase-3.md) |
 | 4 | Polish: tray, SSL trust, onboarding, autostart | ✅ |
 | 5 | Backend Apache | belum |
-| 6 | Distribusi: NSIS dan auto-update | ditunda |
+| 6 | Distribusi: NSIS dan auto-update | NSIS dibuat, auto-update ditunda |
 
 ## Cara kerja
 

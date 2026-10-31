@@ -72,6 +72,8 @@ pub struct Snapshot {
     pub composer_global: crate::composer::GlobalStatus,
     /// Lokasi config yang sedang dipakai, supaya UI bisa menyebutnya.
     pub config_path: String,
+    /// Folder data DevKu: config, engines, runtime, dan log.
+    pub home_path: String,
     /// Nilai Run di registry untuk binary yang sedang berjalan, bukan sekadar
     /// catatan config: user bisa mencabutnya lewat Task Manager.
     pub start_at_login: bool,
@@ -213,6 +215,7 @@ impl Session {
             composer_php_missing: composer.php_missing,
             composer_global: crate::composer::global_status(),
             config_path: self.paths.config_file().to_string_lossy().to_string(),
+            home_path: self.paths.root.to_string_lossy().to_string(),
             start_at_login: crate::autostart::is_enabled(&crate::autostart::running_exe()),
             sites,
             services,

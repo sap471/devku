@@ -103,13 +103,16 @@ fn probe(name: &'static str, bundled: Option<PathBuf>) -> RuntimeInfo {
     RuntimeInfo::missing(name)
 }
 
-fn find_in_path(name: &str) -> Option<PathBuf> {
+pub fn find_in_path(name: &str) -> Option<PathBuf> {
     #[cfg(windows)]
     let (program, args) = ("where.exe", vec![name]);
     #[cfg(not(windows))]
     let (program, args) = ("which", vec![name]);
 
-    let output = Command::new(program).args(args).output().ok()?;
+    let mut command = Command::new(program);
+    command.args(args);
+    crate::subprocess::hide_console_std(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -122,7 +125,10 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
 }
 
 fn version_of(name: &str, path: &PathBuf) -> Option<String> {
-    let output = Command::new(path).arg("--version").output().ok()?;
+    let mut command = Command::new(path);
+    command.arg("--version");
+    crate::subprocess::hide_console_std(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
