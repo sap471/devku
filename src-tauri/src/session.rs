@@ -61,6 +61,11 @@ pub struct Snapshot {
     /// Versi yang dipakai untuk situs baru dan untuk shim `php` di PATH.
     pub default_php: String,
     pub php_path: crate::path_env::PathStatus,
+    pub composer_installed: bool,
+    pub composer_version: Option<String>,
+    /// PHP yang dipakai shim Composer saat ini.
+    pub composer_php: Option<String>,
+    pub composer_php_missing: bool,
     pub sites: Vec<SiteView>,
     pub services: Vec<ServiceView>,
 }
@@ -170,6 +175,8 @@ impl Session {
             })
             .collect();
 
+        let composer = crate::composer::status(&self.paths);
+
         Snapshot {
             tld: self.config.tld.clone(),
             running: self.runtime.is_some(),
@@ -178,6 +185,12 @@ impl Session {
             installed_php: crate::php::PhpManager::new(self.paths.clone()).installed(),
             default_php: self.default_php().unwrap_or_default(),
             php_path: crate::path_env::status(&self.paths),
+            composer_installed: composer.installed,
+            composer_version: composer.version,
+            composer_php: composer
+                .php
+                .map(|choice| choice.path.to_string_lossy().to_string()),
+            composer_php_missing: composer.php_missing,
             sites,
             services,
         }

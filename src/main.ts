@@ -28,6 +28,10 @@ interface Snapshot {
   installed_php: string[];
   default_php: string;
   php_path: PathStatus;
+  composer_installed: boolean;
+  composer_version: string | null;
+  composer_php: string | null;
+  composer_php_missing: boolean;
   sites: SiteView[];
   services: ServiceView[];
 }
@@ -229,7 +233,7 @@ function percentOf(job: DownloadProgress): number {
   return job.total ? Math.min(100, (job.received / job.total) * 100) : 0;
 }
 
-function downloadButton(target: "caddy" | "bun"): string {
+function downloadButton(target: "caddy" | "bun" | "composer"): string {
   const job = download?.target === target ? download : null;
   if (job) {
     return `<span class="catalog-progress">
@@ -239,12 +243,18 @@ function downloadButton(target: "caddy" | "bun"): string {
       </span>`;
   }
 
-  const installable = target === "caddy" ? !snapshot?.caddy_installed : !hasBun();
+  const installable =
+    target === "caddy"
+      ? !snapshot?.caddy_installed
+      : target === "bun"
+        ? !hasBun()
+        : !snapshot?.composer_installed || snapshot.composer_php_missing;
   if (!installable) return "";
 
+  const label = target === "composer" && snapshot?.composer_installed ? "Perbaiki" : "Pasang";
   return `<button class="btn" type="button" data-action="install-${target}" ${
     download ? "disabled" : ""
-  }>Pasang</button>`;
+  }>${label}</button>`;
 }
 
 function hasBun(): boolean {
@@ -260,6 +270,18 @@ function renderBinaries(): string {
   const bun = bunSource?.version
     ? `<span class="tag">${esc(bunSource.source)}</span>`
     : '<span class="tag">belum</span>';
+
+  const composer = snapshot?.composer_installed
+    ? '<span class="tag">terpasang</span>'
+    : '<span class="tag">belum</span>';
+
+  const composerHint = !snapshot?.composer_installed
+    ? "pengelola paket PHP, memakai php di PATH"
+    : snapshot.composer_php_missing
+      ? "php tidak ditemukan; pasang atau daftarkan PHP dulu"
+      : `${
+          snapshot.composer_version ? `Composer ${esc(snapshot.composer_version)}` : "Composer"
+        }${snapshot.composer_php ? ` · php ${esc(snapshot.composer_php)}` : ""}`;
 
   return `
     <div class="path-row">
@@ -279,6 +301,13 @@ function renderBinaries(): string {
       }</span>
       <span class="spacer"></span>
       ${downloadButton("bun")}
+    </div>
+    <div class="path-row">
+      <span class="catalog-version">Composer</span>
+      ${composer}
+      <span class="hint">${composerHint}</span>
+      <span class="spacer"></span>
+      ${downloadButton("composer")}
     </div>
     <div class="path-row">
       <span class="catalog-version">HTTPS lokal</span>
@@ -550,7 +579,7 @@ async function runTs(): Promise<void> {
   await terminalPanel.run(site.root, `bun "${file}"`);
 }
 
-async function installBinary(target: "caddy" | "bun"): Promise<void> {
+async function installBinary(target: "caddy" | "bun" | "composer"): Promise<void> {
   notice = null;
   download = { target, version: "", received: 0, total: null, stage: "daftar" };
   render();
@@ -559,10 +588,8 @@ async function installBinary(target: "caddy" | "bun"): Promise<void> {
     const next = await invoke<Snapshot>(`install_${target}`);
     applySnapshot(next);
   } catch (err) {
-    notice =
-      target === "caddy"
-        ? `Gagal memasang Caddy: ${String(err)}`
-        : `Gagal memasang Bun: ${String(err)}`;
+    const label = target === "caddy" ? "Caddy" : target === "bun" ? "Bun" : "Composer";
+    notice = `Gagal memasang ${label}: ${String(err)}`;
   } finally {
     download = null;
     render();
@@ -1455,6 +1482,9 @@ document.addEventListener("click", (event) => {
       break;
     case "install-bun":
       void installBinary("bun");
+      break;
+    case "install-composer":
+      void installBinary("composer");
       break;
     case "trust-caddy":
       void trustCaddy();

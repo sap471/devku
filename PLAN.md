@@ -336,7 +336,7 @@ Selesai bila: satu site `backend: apache` dengan `.htaccess` custom dan satu sit
 
 ## 7. Non-goals (v1)
 
-- Bukan pengganti Composer — pakai Composer yang sudah ada di mesin atau unduh terpisah.
+- Bukan pengelola dependency PHP: DevKu bisa memasang Composer, tetapi `composer.json`, lockfile, dan paket tetap urusan Composer.
 - Tidak mengelola database server (MySQL/Postgres). Skema integrasi bisa masuk v2 lewat `docker compose` opsional.
 - Tanpa dukungan macOS/Linux di v1. Arsitektur tidak menutup kemungkinan, tapi backend dan hosts handling berbeda.
 - Tidak mengemulasi `.htaccess` di Caddy. Itu jalan pintas yang rapuh — Apache backend adalah jawaban yang benar.

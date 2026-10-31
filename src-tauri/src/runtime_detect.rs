@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
@@ -36,9 +36,49 @@ pub fn detect(paths: &Paths) -> Vec<RuntimeInfo> {
     vec![
         probe("bun", Some(paths.bundled_binary("bun"))),
         probe("node", None),
-        probe("composer", None),
+        composer_runtime(paths),
         probe("php", bundled_php),
     ]
+}
+
+/// Composer bawaan DevKu berupa shim `.bat`, bukan binary yang bisa dijalankan
+/// langsung dengan `--version`. Versinya dibaca dari catatan pemasangan, dan
+/// shim DevKu tidak boleh dianggap sebagai Composer sistem.
+fn composer_runtime(paths: &Paths) -> RuntimeInfo {
+    let managed = crate::composer::shim(paths);
+
+    if let Some(path) = find_in_path("composer")
+        && !same_path(&path, &managed)
+    {
+        return RuntimeInfo {
+            name: "composer",
+            version: version_of("composer", &path),
+            source: "sistem",
+            path: Some(path.to_string_lossy().to_string()),
+        };
+    }
+
+    let status = crate::composer::status(paths);
+    if status.installed {
+        return RuntimeInfo {
+            name: "composer",
+            version: status.version,
+            source: "bawaan",
+            path: Some(managed.to_string_lossy().to_string()),
+        };
+    }
+
+    RuntimeInfo::missing("composer")
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    fn normalize(path: &Path) -> String {
+        path.to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    }
+    normalize(left) == normalize(right)
 }
 
 fn probe(name: &'static str, bundled: Option<PathBuf>) -> RuntimeInfo {

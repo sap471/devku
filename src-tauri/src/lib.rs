@@ -2,6 +2,7 @@ pub mod api;
 pub mod archive;
 pub mod caddy;
 pub mod commands;
+pub mod composer;
 pub mod config;
 pub mod detect;
 pub mod download;
@@ -80,6 +81,7 @@ pub fn run() {
             commands::disable_php_path,
             commands::install_caddy,
             commands::install_bun,
+            commands::install_composer,
             commands::site_commands,
         ])
         .build(tauri::generate_context!())

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -39,6 +40,7 @@ async fn main() -> Result<()> {
         Some("php-path") => php_path(args.get(1).map(String::as_str)),
         Some("up") => up(&args).await,
         Some("runtimes") => runtimes(),
+        Some("install-composer") => install_composer().await,
         Some("trust") => trust().await,
         Some(other) => {
             help();
@@ -64,6 +66,7 @@ fn help() {
          devku-cli php-path [on|off]\n  \
          devku-cli up [--seconds N]\n  \
          devku-cli runtimes\n  \
+         devku-cli install-composer\n  \
          devku-cli trust\n\n\
          DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
     );
@@ -319,6 +322,39 @@ fn runtimes() -> Result<()> {
             runtime.name, version, runtime.source, path
         );
     }
+    Ok(())
+}
+
+/// Pasang Composer langsung dari CLI. PHP diambil dari PATH lebih dulu, sama
+/// seperti tombol di UI.
+async fn install_composer() -> Result<()> {
+    let paths = Paths::resolve();
+    let cancel = AtomicBool::new(false);
+
+    eprintln!("[devku] menyiapkan Composer...");
+    let mut last = "";
+    let installed = devku_lib::composer::install(&paths, &cancel, |stage, _, _| {
+        if stage != last {
+            eprintln!("[devku] {stage}");
+            last = stage;
+        }
+    })
+    .await?;
+
+    println!("Composer {} terpasang", installed.version);
+    println!(
+        "phar         {}",
+        devku_lib::composer::phar(&paths).display()
+    );
+    println!(
+        "php          {} ({})",
+        installed.php.path.display(),
+        installed.php.source
+    );
+    println!(
+        "shim         {}",
+        devku_lib::composer::shim(&paths).display()
+    );
     Ok(())
 }
 

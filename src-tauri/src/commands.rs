@@ -536,6 +536,31 @@ async fn install_bun_inner(
     Ok(())
 }
 
+/// Composer memakai PHP yang ada di PATH lebih dulu. Kalau tidak ada, PHP
+/// bawaan DevKu dipakai dan jalurnya diingat supaya shim tetap hidup di
+/// terminal DevKu.
+#[tauri::command]
+pub async fn install_composer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    slot: State<'_, download::Slot>,
+) -> Result<Snapshot, String> {
+    let paths = session_paths(&state).await?;
+    let cancel = slot.begin().map_err(error)?;
+    let result = crate::composer::install(&paths, &cancel, |stage, received, total| {
+        report(&app, "composer", "", received, total, stage);
+    })
+    .await;
+    slot.finish();
+    result.map_err(error)?;
+
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    Ok(session.snapshot().await)
+}
+
 #[tauri::command]
 pub fn cancel_download(slot: State<'_, download::Slot>) -> bool {
     slot.cancel()
