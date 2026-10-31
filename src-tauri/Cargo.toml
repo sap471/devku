@@ -4,9 +4,6 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
-# Tanpa ini cargo tidak tahu mana yang harus dijalankan saat ada lebih dari
-# satu binary (devku untuk aplikasi, devku-cli untuk kontrol headless).
-default-run = "devku"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -37,7 +34,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.13", default-features = false, features = ["stream", "native-tls"] }
 sha2 = "0.10"
 winreg = "0.56"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

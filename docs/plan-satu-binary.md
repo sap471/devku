@@ -1,6 +1,6 @@
 # Rencana: satu binary `devku`
 
-Status: rencana, belum dikerjakan. Dibuat 2026-10-31.
+Status: selesai 2026-10-31. Dibuat 2026-10-31.
 
 ## Tujuan
 
@@ -206,13 +206,13 @@ Tidak ada perubahan config, skema, atau data pengguna. Rollback cukup mengembali
 
 ## Definisi selesai
 
-- [ ] Satu berkas `devku.exe` di `target/release`, tanpa `devku-cli.exe`.
-- [ ] Tanpa argumen membuka UI; `--hidden` membuka tanpa jendela dan menyalakan service.
-- [ ] Semua subperintah lama berjalan dengan nama `devku <perintah>`, termasuk `export-config` dan `install-composer`.
-- [ ] Keluaran terlihat di PowerShell, cmd, pipe, dan redirect berkas pada build release.
-- [ ] Exit code 0, 1, dan 2 sesuai tabel.
-- [ ] `cargo test`, clippy, `bun run check`, dan `tauri dev` lulus.
-- [ ] Dokumentasi dan `CHANGELOG.md` tidak lagi menyebut dua binary.
+- [x] Satu berkas `devku.exe` di `target/release`, tanpa `devku-cli.exe`.
+- [x] Tanpa argumen membuka UI; `--hidden` membuka tanpa jendela dan menyalakan service.
+- [x] Semua subperintah lama berjalan dengan nama `devku <perintah>`, termasuk `export-config` dan `install-composer`.
+- [x] Keluaran terlihat di PowerShell, cmd, pipe, dan redirect berkas pada build release.
+- [x] Exit code 0, 1, dan 2 sesuai tabel.
+- [x] `cargo test`, clippy, `bun run check`, dan `tauri dev` lulus.
+- [x] Dokumentasi dan `CHANGELOG.md` tidak lagi menyebut dua binary.
 
 ## Di luar cakupan
 

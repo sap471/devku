@@ -255,7 +255,7 @@ Deliverable:
 - [x] `PhpSupervisor` (generik di `proc.rs`): pantau proses, restart + backoff, crash-loop breaker, readiness via TCP.
 - [x] `HostsManager`: blok bertanda `# devku:begin` / `# devku:end`. **Hanya dipakai bila TLD ≠ `localhost`.**
 - [x] `PortAllocator`: port bebas mulai 9001, deterministik per versi.
-- [x] CLI internal `devku-cli` — `up`, `status`, `sites`, `check`, `install-php`, `install-caddy`, `add-site`.
+- [x] CLI internal `devku` (binary yang sama dengan aplikasi) - `up`, `status`, `sites`, `check`, `install-php`, `install-caddy`, `add-site`.
 
 Selesai bila: bisa menyalakan Caddy + 2 versi PHP dari CLI internal, dan `curl http://app-a.localhost` mengembalikan response PHP yang benar.
 
@@ -300,7 +300,7 @@ Deliverable:
 - [x] SSL trust: `tls internal` per situs, `caddy trust` sekali, status ditampilkan (`ba46c69`).
 - [x] Onboarding first-run: deteksi runtime, tawaran pasang Caddy, pilih PHP, lalu situs pertama. Status langkah dibaca dari keadaan nyata, bukan progres tersimpan.
 - [x] Export/import `config.json`. Impor melewati folder yang tidak ada, menonaktifkan situs dengan PHP belum terpasang, dan tidak menyalin status trust antar mesin.
-- [x] Auto-start saat login: nilai `HKCU\...\Run` berisi `"devku.exe" --hidden`; dibuka tanpa jendela, service langsung menyala. Bisa dilepas lagi dari UI atau `devku-cli autostart off`.
+- [x] Auto-start saat login: nilai `HKCU\...\Run` berisi `"devku.exe" --hidden`; dibuka tanpa jendela, service langsung menyala. Bisa dilepas lagi dari UI atau `devku autostart off`.
 
 Selesai bila: DevKu bisa dipakai harian tanpa membuka jendela, dan environment bisa dibagikan lewat berkas config.
 
