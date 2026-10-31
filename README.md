@@ -2,7 +2,7 @@
 
 Development environment PHP untuk Windows: ringan, multi-PHP per domain, terintegrasi dengan runtime sistem.
 
-Ganti XAMPP/Laragon dengan sesuatu yang lebih kecil dan lebih bisa diatur. Rencana lengkap: [`PLAN.md`](PLAN.md).
+Ganti XAMPP/Laragon dengan sesuatu yang lebih kecil dan lebih bisa diatur. Rencana lengkap: [`PLAN.md`](PLAN.md). Riwayat perubahan: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Status
 
@@ -10,10 +10,11 @@ Ganti XAMPP/Laragon dengan sesuatu yang lebih kecil dan lebih bisa diatur. Renca
 |---|---|---|
 | 0 | Spike arsitektur | ✅ [hasil](docs/spike-fase-0.md) |
 | 1 | Core services + CLI | ✅ [hasil](docs/fase-1.md) |
-| 2 | UI project manager | belum |
-| 3 | Integrasi runtime (Bun/Node) | belum |
-| 4 | Distribusi & polish | belum |
+| 2 | UI project manager | ✅ wizard, log, hapus situs |
+| 3 | Integrasi runtime (Bun/Node/PHP/Composer) | ✅ [hasil](docs/fase-3.md) |
+| 4 | Polish: tray, SSL trust, onboarding, autostart | ✅ |
 | 5 | Backend Apache | belum |
+| 6 | Distribusi: NSIS dan auto-update | ditunda |
 
 ## Cara kerja
 
@@ -40,7 +41,7 @@ $cli = "src-tauri\target\debug\devku-cli.exe"
 & $cli up
 ```
 
-Perintah lain: `status`, `sites`, `check`. `DEVKU_HOME` menimpa lokasi config/engines (default `%APPDATA%\DevKu`).
+Perintah lain: `status`, `sites`, `check`, `runtimes`, `php-path`, `install-composer`, `composer-path`, `autostart`, `export-config`, `import-config`, `trust`. `DEVKU_HOME` menimpa lokasi config/engines (default `%APPDATA%\DevKu`).
 
 ## Development
 

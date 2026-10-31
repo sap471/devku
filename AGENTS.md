@@ -25,6 +25,7 @@ Development environment untuk PHP di Windows. Lihat [`PLAN.md`](PLAN.md).
 
 - Komentar kode: hanya yang menjelaskan *mengapa*, bukan *apa*. Tanpa komentar dekoratif.
 - Config pengguna (`config.json`, `.devku.json`) selalu bisa dibaca dan di-diff.
+- Setiap perubahan perilaku dicatat di `CHANGELOG.md` pada bagian `[Unreleased]`, dengan hash commit.
 - Rust: `cargo fmt` + `cargo clippy` sebelum commit.
 - Frontend: `bun run check` untuk typecheck.
 
