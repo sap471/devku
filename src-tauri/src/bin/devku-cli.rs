@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
         Some("add-site") => add_site(&args),
         Some("php-path") => php_path(args.get(1).map(String::as_str)),
         Some("up") => up(&args).await,
+        Some("trust") => trust().await,
         Some(other) => {
             help();
             bail!("perintah tidak dikenal: {other}")
@@ -60,7 +61,8 @@ fn help() {
          devku-cli install-caddy <path>\n  \
          devku-cli add-site <id> <nama> <folder> <versi-php> [domain]\n  \
          devku-cli php-path [on|off]\n  \
-         devku-cli up [--seconds N]\n\n\
+         devku-cli up [--seconds N]\n  \
+         devku-cli trust\n\n\
          DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
     );
 }
@@ -302,4 +304,14 @@ fn parse_seconds(args: &[String]) -> Result<Option<u64>> {
         }
     }
     Ok(None)
+}
+
+/// Pasang CA lokal Caddy ke trust store, langsung dari CLI. Caddy harus
+/// berjalan (admin API hidup) seperti tombol UI menjalankannya.
+async fn trust() -> Result<()> {
+    let paths = Paths::resolve();
+    let backend = CaddyBackend::new(paths.clone());
+    let status = backend.trust().await?;
+    println!("certificate: {status}");
+    Ok(())
 }

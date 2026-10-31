@@ -24,6 +24,7 @@ interface Snapshot {
   tld: string;
   running: boolean;
   caddy_installed: boolean;
+  https_trusted: boolean;
   installed_php: string[];
   default_php: string;
   php_path: PathStatus;
@@ -268,7 +269,22 @@ function renderBinaries(): string {
       }</span>
       <span class="spacer"></span>
       ${downloadButton("bun")}
+    </div>
+    <div class="path-row">
+      <span class="catalog-version">HTTPS lokal</span>
+      ${snapshot?.https_trusted ? '<span class="tag">terpercaya</span>' : '<span class="tag">belum</span>'}
+      <span class="hint">${httpsHint()}</span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-action="trust-caddy" ${
+        snapshot?.caddy_installed && snapshot?.running ? "" : "disabled"
+      }>Percayai</button>
     </div>`;
+}
+
+function httpsHint(): string {
+  if (!snapshot?.caddy_installed) return "pasang Caddy dulu";
+  if (!snapshot.running) return "start semua dulu; caddy trust membaca CA dari service yang hidup";
+  return "setiap situs juga tersedia di https://domain";
 }
 
 function renderPhpCatalog(): string {
@@ -537,8 +553,19 @@ async function installBinary(target: "caddy" | "bun"): Promise<void> {
   }
 }
 
-function stageLabel(job: DownloadProgress): string {
-  if (job.stage === "unduh") {
+async function trustCaddy(): Promise<void> {
+  notice = null;
+  render();
+  try {
+    const next = await invoke<Snapshot>("trust_caddy");
+    applySnapshot(next);
+  } catch (err) {
+    notice = `Gagal memercayai sertifikat: ${String(err)}`;
+  }
+  render();
+}
+
+function stageLabel(job: DownloadProgress): string {  if (job.stage === "unduh") {
     return job.total
       ? `${megabytes(job.received)} / ${megabytes(job.total)}`
       : `${megabytes(job.received)} terunduh`;
@@ -1411,6 +1438,9 @@ document.addEventListener("click", (event) => {
       break;
     case "install-bun":
       void installBinary("bun");
+      break;
+    case "trust-caddy":
+      void trustCaddy();
       break;
     case "run-command": {
       const command = target.dataset.command;

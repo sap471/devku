@@ -73,6 +73,10 @@ pub struct Config {
     /// Menyalakan service begitu aplikasi dibuka. Bisa dimatikan di config.
     #[serde(default = "yes")]
     pub autostart: bool,
+    /// Catatan bahwa CA lokal Caddy sudah dipercaya sistem. Bukan hasil cek
+    /// live, jadi tombol Percayai tetap boleh dijalankan ulang kapan saja.
+    #[serde(default)]
+    pub https_trusted: bool,
     #[serde(default)]
     pub php: PhpSettings,
     #[serde(default)]
@@ -94,6 +98,7 @@ impl Default for Config {
             backend: Backend::Caddy,
             tld: default_tld(),
             autostart: true,
+            https_trusted: false,
             php: PhpSettings {
                 installed: BTreeSet::new(),
                 active: String::new(),

@@ -82,6 +82,26 @@ pub async fn stop(state: State<'_, AppState>) -> Result<Snapshot, String> {
     Ok(session.snapshot().await)
 }
 
+/// `caddy trust` lewat aplikasi: jalankan binary terpakai, catat hasilnya di
+/// config, dan kembalikan snapshot terbaru. Butuh service hidup karena
+/// `caddy trust` mengambil info CA dari admin API.
+#[tauri::command]
+pub async fn trust_caddy(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    if !session.is_running() {
+        return Err("Caddy belum berjalan. Start semua dulu, lalu percayai sertifikatnya.".into());
+    }
+
+    let backend = crate::caddy::CaddyBackend::new(session.paths().clone());
+    backend.trust().await.map_err(error)?;
+    session.mark_https_trusted().map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
 #[tauri::command]
 pub async fn add_site(state: State<'_, AppState>, draft: SiteDraft) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;

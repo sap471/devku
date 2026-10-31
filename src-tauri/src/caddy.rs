@@ -121,7 +121,13 @@ impl WebServerBackend for CaddyBackend {
     fn render(&self, config: &Config, php_ports: &BTreeMap<String, u16>) -> Result<String> {
         let sites: Vec<_> = config.served_sites().collect();
 
-        let mut out = String::from("{\n\tadmin localhost:2019\n\tauto_https off\n}\n");
+        // skip_install_trust: tanpa ini Caddy memasang CA ke trust store saat
+        // startup dan di Windows itu memunculkan dialog "Security Warning"
+        // yang menggantung server sampai diklik. Pemasangan jadi lewat tombol
+        // Percayai / `devku-cli trust` yang non-interaktif. auto_https dibiarkan
+        // menyala: auto_https off menggagalkan pembuatan cert internal; label
+        // http:///https:// eksplisit per situs sudah mencegah redirect.
+        let mut out = String::from("{\n\tadmin localhost:2019\n\tskip_install_trust\n}\n");
 
         for site in sites {
             let port = php_ports.get(&site.php).with_context(|| {
@@ -139,7 +145,8 @@ impl WebServerBackend for CaddyBackend {
             let log = quote(&self.paths.logs().join(format!("{}.log", site.id)));
 
             out.push_str(&format!(
-                "\nhttp://{domain} {{\n\
+                "\nhttp://{domain}, https://{domain} {{\n\
+                 \ttls internal\n\
                  \troot * {root}\n\
                  \tencode gzip\n\
                  \tphp_fastcgi 127.0.0.1:{port}\n\
@@ -160,7 +167,8 @@ impl WebServerBackend for CaddyBackend {
         // domain mendarat di halaman yang menjelaskan keadaannya.
         let dashboard = quote(&self.paths.dashboard_dir());
         out.push_str(&format!(
-            "\nhttp://localhost, http://127.0.0.1 {{\n\
+            "\nhttp://localhost, https://localhost, http://127.0.0.1 {{\n\
+             \ttls internal\n\
              \troot * {dashboard}\n\
              \tfile_server\n\
              }}\n\
@@ -225,6 +233,48 @@ impl WebServerBackend for CaddyBackend {
 
     async fn healthy(&self) -> bool {
         api::ping().await
+    }
+}
+
+impl CaddyBackend {
+    /// Sampaikan ke Caddy agar memasang CA lokalnya ke trust store Windows.
+    /// Butuh admin API Caddy yang hidup, jadi dipanggil hanya saat service
+    /// jalan. Tanpa hak admin pun lulus: Caddy menulis ke `CurrentUser\Root`.
+    pub async fn trust(&self) -> Result<&'static str> {
+        if !self.is_installed() {
+            bail!("Caddy belum terpasang di {}", self.binary().display());
+        }
+
+        let output = tokio::process::Command::new(self.binary())
+            .arg("trust")
+            .env("XDG_DATA_HOME", self.paths.runtime().as_os_str())
+            .env("XDG_CONFIG_HOME", self.paths.runtime().as_os_str())
+            .output()
+            .await
+            .with_context(|| format!("gagal menjalankan {}", self.binary().display()))?;
+
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if !output.status.success() {
+            bail!("{}", extract_caddy_error(&output.stderr, &output.stdout));
+        }
+
+        Ok(classify_trust(&text))
+    }
+}
+
+/// Bedakan dua hasil yang sama-sama berhasil: cert memang sudah terpasang,
+/// atau baru saja dipasang. Yurinya dipakai UI.
+fn classify_trust(text: &str) -> &'static str {
+    if text.contains("already trusted by system") {
+        "sudah"
+    } else if text.contains("installed properly") {
+        "baru"
+    } else {
+        "selesai"
     }
 }
 
@@ -359,6 +409,7 @@ mod tests {
             backend: Backend::Caddy,
             tld: "localhost".to_string(),
             autostart: true,
+            https_trusted: false,
             php: PhpSettings {
                 installed: BTreeSet::new(),
                 active: "8.3.36".to_string(),
@@ -407,10 +458,30 @@ mod tests {
         let text = caddy.render(&sample_config(), &ports()).unwrap();
 
         assert!(text.contains("http://app-a.localhost"));
+        assert!(text.contains("https://app-a.localhost"));
+        assert!(text.contains("tls internal"));
         assert!(text.contains("php_fastcgi 127.0.0.1:9001"));
         assert!(text.contains("http://app-b.localhost"));
+        assert!(text.contains("https://app-b.localhost"));
         assert!(text.contains("php_fastcgi 127.0.0.1:9002"));
+        assert!(text.contains("https://localhost"));
         assert_eq!(text.matches("php_fastcgi").count(), 2);
+        assert_eq!(text.matches("tls internal").count(), 3);
+    }
+
+    #[test]
+    fn classify_trust_reads_both_success_shapes() {
+        assert_eq!(
+            classify_trust(
+                r#"{"msg":"root certificate is already trusted by system","path":"localhost:2019/pki/ca/local"}"#
+            ),
+            "sudah"
+        );
+        assert_eq!(
+            classify_trust(r#"{"msg":"certificate installed properly in windows trusts"}"#),
+            "baru"
+        );
+        assert_eq!(classify_trust("tgasbg"), "selesai");
     }
 
     #[test]
@@ -447,6 +518,7 @@ mod tests {
         let config = Config::default();
         let text = caddy.render(&config, &BTreeMap::new()).unwrap();
         assert!(text.contains("admin localhost:2019"));
+        assert!(text.contains("skip_install_trust"));
         assert!(!text.contains("php_fastcgi"));
     }
 
@@ -500,7 +572,7 @@ mod tests {
         };
 
         let text = caddy.render(&config, &BTreeMap::new()).unwrap();
-        assert!(text.contains("http://localhost, http://127.0.0.1"));
+        assert!(text.contains("http://localhost, https://localhost, http://127.0.0.1"));
         assert!(text.contains("\nhttp:// {"));
     }
 

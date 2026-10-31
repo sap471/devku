@@ -55,6 +55,8 @@ pub struct Snapshot {
     pub tld: String,
     pub running: bool,
     pub caddy_installed: bool,
+    /// Catatan dari config: CA lokal Caddy pernah dipercaya lewat DevKu.
+    pub https_trusted: bool,
     pub installed_php: Vec<String>,
     /// Versi yang dipakai untuk situs baru dan untuk shim `php` di PATH.
     pub default_php: String,
@@ -172,6 +174,7 @@ impl Session {
             tld: self.config.tld.clone(),
             running: self.runtime.is_some(),
             caddy_installed: crate::caddy::CaddyBackend::new(self.paths.clone()).is_installed(),
+            https_trusted: self.config.https_trusted,
             installed_php: crate::php::PhpManager::new(self.paths.clone()).installed(),
             default_php: self.default_php().unwrap_or_default(),
             php_path: crate::path_env::status(&self.paths),
@@ -325,6 +328,14 @@ impl Session {
         self.config.php.active = php.to_string();
         self.config.save(&self.paths)?;
         crate::path_env::sync_shim(&self.paths, php)?;
+        Ok(())
+    }
+
+    /// Setelah `caddy trust` sukses. Disimpan bukan sebagai bukti live, tapi
+    /// sebagai riwayat yang UI pakai untuk menampilkan statusnya.
+    pub fn mark_https_trusted(&mut self) -> Result<()> {
+        self.config.https_trusted = true;
+        self.config.save(&self.paths)?;
         Ok(())
     }
 

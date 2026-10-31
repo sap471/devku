@@ -60,6 +60,7 @@ pub fn run() {
             commands::snapshot,
             commands::start,
             commands::stop,
+            commands::trust_caddy,
             commands::add_site,
             commands::remove_site,
             commands::set_site_enabled,
