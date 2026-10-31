@@ -72,6 +72,38 @@ pub fn open(dir: &Path, target: &str) -> Result<()> {
     }
 }
 
+/// Membuka satu berkas di editor. Urutannya VS Code, Zed, lalu Notepad, supaya
+/// tombolnya tetap bekerja di mesin yang tidak punya editor terpasang.
+pub fn open_file(path: &Path) -> Result<&'static str> {
+    if !path.exists() {
+        bail!("berkas {} tidak ada", path.display());
+    }
+
+    let (mut command, label) = if cfg!(windows) {
+        if find_in_path("code").is_some() {
+            let mut command = Command::new("cmd.exe");
+            command.arg("/C").arg("code").arg(path);
+            (command, "VS Code")
+        } else if let Some(exe) = find_in_path("zed") {
+            let mut command = Command::new(exe);
+            command.arg(path);
+            (command, "Zed")
+        } else {
+            let mut command = Command::new("notepad.exe");
+            command.arg(path);
+            (command, "Notepad")
+        }
+    } else {
+        let mut command = Command::new("xdg-open");
+        command.arg(path);
+        (command, "editor")
+    };
+
+    hide_console_std(&mut command);
+    spawn_detached(&mut command)?;
+    Ok(label)
+}
+
 /// `code` di Windows berupa `code.cmd`, jadi harus lewat shell.
 fn run_in_shell(program: &str, dir: &Path, missing: &str) -> Result<()> {
     if find_in_path(program).is_none() {
@@ -168,6 +200,13 @@ mod tests {
     fn missing_folder_is_reported_before_launch() {
         let dir = std::env::temp_dir().join("devku-launcher-tidak-ada");
         let err = open(&dir, "explorer").unwrap_err();
+        assert!(err.to_string().contains("tidak ada"));
+    }
+
+    #[test]
+    fn missing_file_is_reported_before_launch() {
+        let file = std::env::temp_dir().join("devku-launcher-tidak-ada.php.ini");
+        let err = open_file(&file).unwrap_err();
         assert!(err.to_string().contains("tidak ada"));
     }
 }

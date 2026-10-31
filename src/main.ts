@@ -112,6 +112,19 @@ interface ImportResponse {
   snapshot: Snapshot;
 }
 
+interface PhpRemoval {
+  version: string | null;
+  disabled_sites: string[];
+  default_php: string;
+  composer_moved: boolean;
+  removed_all: boolean;
+}
+
+interface PhpRemovalResponse {
+  removal: PhpRemoval;
+  snapshot: Snapshot;
+}
+
 interface SiteCommand {
   id: string;
   label: string;
@@ -140,6 +153,8 @@ let snapshot: Snapshot | null = null;
 let loading = true;
 let bootError: string | null = null;
 let notice: string | null = null;
+/// Kabar berhasil, ditampilkan di banner yang sama tapi dengan warna netral.
+let infoNotice: string | null = null;
 let busy: string | null = null;
 let selectedId: string | null = null;
 let wizard: Wizard | null = null;
@@ -408,29 +423,25 @@ function renderPhpCatalog(): string {
     ? `<p class="hint">${esc(phpCatalogWarning)}</p>`
     : "";
 
-  if (phpCatalog.length === 0) {
-    return `${warning}<p class="hint">Tidak ada versi yang bisa dipasang.</p>`;
+  const available = phpCatalog.filter((entry) => !entry.installed);
+
+  if (available.length === 0) {
+    return `${warning}<p class="hint">Semua versi di daftar sudah terpasang.</p>`;
   }
 
-  const rows = phpCatalog
+  const rows = available
     .map((entry) => {
       const job =
         download?.target === "php" && download.version === entry.version ? download : null;
-      let action: string;
-
-      if (job) {
-        action = `<span class="catalog-progress">
+      const action = job
+        ? `<span class="catalog-progress">
             <span class="progress"><span style="width:${percentOf(job)}%"></span></span>
             <span class="hint">${esc(stageLabel(job))}</span>
             <button class="btn btn-quiet" type="button" data-action="cancel-download">Batal</button>
-          </span>`;
-      } else if (entry.installed) {
-        action = '<span class="tag">terpasang</span>';
-      } else {
-        action = `<button class="btn" type="button" data-action="install-php" data-version="${esc(
-          entry.version,
-        )}" ${download ? "disabled" : ""}>Pasang</button>`;
-      }
+          </span>`
+        : `<button class="btn" type="button" data-action="install-php" data-version="${esc(
+            entry.version,
+          )}" ${download ? "disabled" : ""}>Pasang</button>`;
 
       return `<div class="catalog-row"><span class="catalog-version">${esc(
         entry.version,
@@ -441,6 +452,47 @@ function renderPhpCatalog(): string {
     .join("");
 
   return `${warning}<div class="catalog">${rows}</div>`;
+}
+
+/// Daftar versi terpasang beserta aksi per versi. Katalog di bawahnya hanya
+/// menampilkan versi yang belum terpasang, jadi tidak ada baris ganda.
+function renderInstalledPhp(): string {
+  const installed = snapshot?.installed_php ?? [];
+  if (installed.length === 0) return "";
+
+  const path = snapshot?.php_path;
+  const rows = installed
+    .map((version) => {
+      const tags = [
+        version === snapshot?.default_php ? '<span class="tag">default</span>' : "",
+        path?.registered && path.shim_version === version
+          ? '<span class="tag">di PATH</span>'
+          : "",
+      ].join("");
+
+      const service = snapshot?.services.find((item) => item.name === `php-${version}`);
+      const live = service?.status === "ready";
+
+      return `<div class="php-row">
+        <span class="catalog-version">${esc(version)}</span>
+        ${tags}${live ? '<span class="tag">hidup</span>' : ""}
+        <span class="spacer"></span>
+        <button class="btn btn-quiet" type="button" data-action="edit-php-ini" data-version="${esc(
+          version,
+        )}" ${busy ? "disabled" : ""}>Edit php.ini</button>
+        <button class="btn btn-quiet" type="button" data-action="restart-php" data-version="${esc(
+          version,
+        )}" ${busy || !snapshot?.running ? "disabled" : ""}>${
+          live ? "Mulai ulang" : "Mulai"
+        }</button>
+        <button class="btn btn-quiet btn-danger" type="button" data-action="ask-remove-php" data-version="${esc(
+          version,
+        )}" ${busy ? "disabled" : ""}>Hapus</button>
+      </div>`;
+    })
+    .join("");
+
+  return `<div class="log-head"><h3>Terpasang</h3></div><div class="catalog">${rows}</div>`;
 }
 
 function renderPhpSettings(): string {
@@ -460,11 +512,13 @@ function renderPhpSettings(): string {
     ? `<div class="field">
         <label class="field-label" for="default-php">PHP default</label>
         <select class="input" id="default-php" ${busy ? "disabled" : ""}>${options}</select>
-        <p class="hint">Dipakai untuk situs baru dan untuk perintah <code>php</code> di PATH.</p>
+        <p class="hint">Dipakai untuk situs baru dan untuk perintah <code>php</code> di PATH. Perubahan php.ini berlaku setelah pool versi itu dimulai ulang.</p>
       </div>`
     : '<p class="hint">Belum ada PHP terpasang. Pasang satu versi di daftar bawah.</p>';
 
-  if (!path) return defaultField;
+  const list = renderInstalledPhp();
+
+  if (!path) return `${defaultField}${list}`;
 
   const entry = `<code class="path-value">${esc(path.dir)}</code>`;
 
@@ -473,7 +527,7 @@ function renderPhpSettings(): string {
       ? `php → ${esc(path.shim_version)}`
       : "shim belum dibuat";
 
-    return `${defaultField}
+    return `${defaultField}${list}
       <div class="path-row">
         <span class="tag">di PATH</span>
         ${entry}
@@ -490,7 +544,7 @@ function renderPhpSettings(): string {
       <p class="hint">Terminal yang sudah terbuka perlu dibuka ulang agar PATH baru terbaca.</p>`;
   }
 
-  return `${defaultField}
+  return `${defaultField}${list}
     <div class="path-row">
       <span class="tag">belum di PATH</span>
       ${entry}
@@ -1117,16 +1171,17 @@ function renderHeader(): void {
 
 function renderNotice(): void {
   const node = el("notice");
-  if (!notice) {
+  const message = notice ?? infoNotice;
+  if (!message) {
     node.hidden = true;
     node.innerHTML = "";
     return;
   }
 
   node.hidden = false;
-  node.dataset.kind = "error";
+  node.dataset.kind = notice ? "error" : "info";
   node.innerHTML = `
-    <span class="notice-text">${esc(notice)}</span>
+    <span class="notice-text">${esc(message)}</span>
     <button class="btn btn-quiet" type="button" data-action="dismiss-notice">Tutup</button>`;
 }
 
@@ -1390,6 +1445,7 @@ function renderDetail(): void {
           <button class="btn" type="button" data-action="refresh-php">Muat ulang</button>
         </div>
         ${renderPhpSettings()}
+        <div class="log-head"><h3>Pasang versi</h3></div>
         <div id="php-catalog">${renderPhpCatalog()}</div>
         ${renderConfigSection()}
       </div>`;
@@ -1864,6 +1920,114 @@ async function removeSite(id: string): Promise<void> {
   }
 }
 
+async function editPhpIni(version: string): Promise<void> {
+  try {
+    const editor = await invoke<string>("open_php_ini", { version });
+    infoNotice = `php.ini ${version} dibuka di ${editor}.`;
+    notice = null;
+  } catch (err) {
+    notice = `Gagal membuka php.ini: ${String(err)}`;
+    infoNotice = null;
+  }
+  render();
+}
+
+async function restartPhp(version: string): Promise<void> {
+  busy = "restart-php";
+  notice = null;
+  infoNotice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("restart_php", { version });
+    applySnapshot(next);
+    infoNotice = `PHP ${version} sudah dimulai ulang.`;
+  } catch (err) {
+    notice = `Gagal memulai ulang PHP ${version}: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function askRemovePhp(version: string): Promise<void> {
+  const path = snapshot?.php_path;
+  const onPath = Boolean(path?.registered && path.shim_version === version);
+  const sites = (snapshot?.sites ?? []).filter((site) => site.php === version);
+  const enabled = sites.filter((site) => site.enabled);
+  const isDefault = snapshot?.default_php === version;
+
+  const rows = [{ label: "Versi", value: version }];
+  if (sites.length > 0) {
+    rows.push({ label: "Dipakai", value: sites.map((site) => site.name).join(", ") });
+  }
+  if (onPath) {
+    rows.push({ label: "Shim PATH", value: `php → ${version}` });
+  }
+  if (isDefault) {
+    rows.push({ label: "PHP default", value: "pindah ke versi terbaru yang tersisa" });
+  }
+
+  const sentences = ["Folder versi ini dihapus dari disk. Folder project tidak disentuh."];
+  if (enabled.length > 0) {
+    sentences.push(`${enabled.length} situs dinonaktifkan karena PHP-nya hilang.`);
+  }
+  if (onPath) {
+    sentences.push("Versi ini dipakai perintah php di PATH, jadi tidak bisa dihapus sendirian.");
+  }
+
+  const answer = await openDialog({
+    title: onPath ? `PHP ${version} dipakai PATH` : `Hapus PHP ${version}?`,
+    body: sentences.join(" "),
+    rows,
+    choices: onPath
+      ? [{ id: "all", label: "Hapus semua PHP", variant: "danger" }]
+      : [{ id: "remove", label: "Hapus PHP", variant: "danger" }],
+    tone: "danger",
+  });
+  if (!answer) return;
+
+  busy = "remove-php";
+  notice = null;
+  infoNotice = null;
+  render();
+
+  try {
+    const result =
+      answer.choice === "all"
+        ? await invoke<PhpRemovalResponse>("remove_all_php")
+        : await invoke<PhpRemovalResponse>("remove_php", { version });
+    applySnapshot(result.snapshot);
+    infoNotice = summarizeRemoval(result.removal);
+  } catch (err) {
+    notice = `Gagal menghapus PHP: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+function summarizeRemoval(removal: PhpRemoval): string {
+  const parts: string[] = [];
+  if (removal.removed_all) {
+    parts.push("Semua PHP dihapus dari disk dan dilepas dari PATH.");
+  } else if (removal.version) {
+    parts.push(`PHP ${removal.version} dihapus dari disk.`);
+  }
+  if (removal.disabled_sites.length > 0) {
+    parts.push(`${removal.disabled_sites.length} situs dinonaktifkan.`);
+  }
+  parts.push(
+    removal.default_php
+      ? `PHP default sekarang ${removal.default_php}.`
+      : "Belum ada PHP terpasang.",
+  );
+  if (removal.composer_moved) {
+    parts.push("Composer diarahkan ke PHP default baru.");
+  }
+  return parts.join(" ");
+}
+
 /* ---------------------------------------------------------------- misc */
 
 function slug(value: string): string {
@@ -1955,6 +2119,21 @@ document.addEventListener("click", (event) => {
     case "ask-remove":
       if (id) void askRemoveSite(id);
       break;
+    case "edit-php-ini": {
+      const version = target.dataset.version;
+      if (version) void editPhpIni(version);
+      break;
+    }
+    case "restart-php": {
+      const version = target.dataset.version;
+      if (version) void restartPhp(version);
+      break;
+    }
+    case "ask-remove-php": {
+      const version = target.dataset.version;
+      if (version) void askRemovePhp(version);
+      break;
+    }
     case "refresh-log":
       if (selectedId) void loadLog(selectedId);
       break;
@@ -2039,6 +2218,7 @@ document.addEventListener("click", (event) => {
       break;
     case "dismiss-notice":
       notice = null;
+      infoNotice = null;
       render();
       break;
   }

@@ -388,6 +388,16 @@ fn shim_script(php: &Path, phar: &Path) -> String {
     }
 }
 
+/// Menunjuk Composer ke PHP lain tanpa memasang ulang, dipakai saat versi yang
+/// tercatat dihapus. Phar tetap, hanya penunjuk dan shim yang ditulis ulang.
+pub fn set_php(paths: &Paths, php: &Path) -> Result<()> {
+    if !php.exists() {
+        bail!("PHP {} tidak ada", php.display());
+    }
+    write_atomic(&php_marker(paths), &format!("{}\n", php.display()))?;
+    write_shim(paths, php)
+}
+
 fn write_shim(paths: &Paths, php: &Path) -> Result<()> {
     let file = shim(paths);
     if let Some(parent) = file.parent() {

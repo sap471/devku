@@ -806,6 +806,24 @@ select.input {
   font-size: 12px;
 }
 
+.php-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.php-row:last-child {
+  border-bottom: 0;
+}
+
+.php-row .spacer {
+  flex: 1 1 auto;
+}
+
 .catalog-progress {
   display: inline-flex;
   align-items: center;

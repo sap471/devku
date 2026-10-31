@@ -50,6 +50,18 @@ pub struct ServiceView {
     pub detail: Option<String>,
 }
 
+/// Ringkasan satu penghapusan PHP, supaya UI bisa menyebut apa yang ikut
+/// berubah alih-alih hanya "berhasil".
+#[derive(Clone, Debug, Serialize)]
+pub struct PhpRemoval {
+    /// Versi yang dihapus. Kosong berarti semua versi sekaligus.
+    pub version: Option<String>,
+    pub disabled_sites: Vec<String>,
+    pub default_php: String,
+    pub composer_moved: bool,
+    pub removed_all: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub tld: String,
@@ -322,6 +334,140 @@ impl Session {
         self.refresh().await
     }
 
+    /// Berkas php.ini satu versi. Dibuat kalau belum ada, karena folder hasil
+    /// ekstraksi manual bisa datang tanpa berkas ini.
+    pub fn php_ini_path(&self, version: &str) -> Result<PathBuf> {
+        let manager = crate::php::PhpManager::new(self.paths.clone());
+        if !manager.installed().iter().any(|item| item == version) {
+            bail!("PHP {version} belum terpasang");
+        }
+        manager.ensure_ini(version)
+    }
+
+    /// php-cgi membaca php.ini hanya saat proses dimulai, jadi perubahan baru
+    /// berlaku setelah pool versi itu dinyalakan ulang.
+    pub async fn restart_php(&mut self, version: &str) -> Result<()> {
+        let manager = crate::php::PhpManager::new(self.paths.clone());
+        if !manager.installed().iter().any(|item| item == version) {
+            bail!("PHP {version} belum terpasang");
+        }
+        let Some(runtime) = self.runtime.as_mut() else {
+            bail!("service belum berjalan");
+        };
+        let children = self.config.php.children;
+        runtime
+            .restart_version(version, children, &self.paths, self.hook.clone())
+            .await?;
+        Ok(())
+    }
+
+    /// Hapus satu versi PHP. Situs yang memakainya dinonaktifkan, bukan
+    /// dipindah diam-diam ke versi lain.
+    pub async fn remove_php(&mut self, version: &str) -> Result<PhpRemoval> {
+        let manager = crate::php::PhpManager::new(self.paths.clone());
+        let installed = manager.installed();
+        if !installed.iter().any(|item| item == version) {
+            bail!("PHP {version} belum terpasang");
+        }
+
+        let path_status = crate::path_env::status(&self.paths);
+        if path_status.registered && path_status.shim_version.as_deref() == Some(version) {
+            bail!(
+                "PHP {version} dipakai shim php di PATH. Pakai hapus semua PHP kalau memang ingin dilepas."
+            );
+        }
+
+        let remaining: Vec<String> = installed
+            .iter()
+            .filter(|item| item.as_str() != version)
+            .cloned()
+            .collect();
+
+        let mut disabled_sites = Vec::new();
+        for site in &mut self.config.sites {
+            if site.php == version && site.enabled {
+                site.enabled = false;
+                disabled_sites.push(site.name.clone());
+            }
+        }
+
+        if self.config.php.active == version {
+            self.config.php.active = remaining.last().cloned().unwrap_or_default();
+        }
+
+        self.config.save(&self.paths)?;
+        self.refresh().await?;
+        remove_php_dir(&self.paths, version)?;
+
+        let composer_moved = self.repoint_composer(version);
+        if path_status.registered
+            && let Ok(target) = self.default_php()
+            && !target.is_empty()
+        {
+            crate::path_env::sync_shim(&self.paths, &target)?;
+        }
+
+        Ok(PhpRemoval {
+            version: Some(version.to_string()),
+            disabled_sites,
+            default_php: self.default_php().unwrap_or_default(),
+            composer_moved,
+            removed_all: false,
+        })
+    }
+
+    /// Buang semua PHP, termasuk yang dipakai shim PATH. Semua situs
+    /// dinonaktifkan karena tidak ada lagi yang bisa melayaninya.
+    pub async fn remove_all_php(&mut self) -> Result<PhpRemoval> {
+        let manager = crate::php::PhpManager::new(self.paths.clone());
+        let installed = manager.installed();
+        if installed.is_empty() {
+            bail!("tidak ada PHP terpasang");
+        }
+
+        let mut disabled_sites = Vec::new();
+        for site in &mut self.config.sites {
+            if site.enabled {
+                site.enabled = false;
+                disabled_sites.push(site.name.clone());
+            }
+        }
+        self.config.php.active.clear();
+
+        self.config.save(&self.paths)?;
+        self.refresh().await?;
+        for version in &installed {
+            remove_php_dir(&self.paths, version)?;
+        }
+        crate::path_env::unregister(&self.paths)?;
+
+        Ok(PhpRemoval {
+            version: None,
+            disabled_sites,
+            default_php: String::new(),
+            composer_moved: false,
+            removed_all: true,
+        })
+    }
+
+    /// Composer mencatat jalur php.exe saat dipasang. Kalau versi itu dihapus,
+    /// penunjuknya dipindah ke default baru supaya Composer tetap jalan.
+    fn repoint_composer(&self, removed: &str) -> bool {
+        let marker = crate::composer::php_marker(&self.paths);
+        let Ok(text) = std::fs::read_to_string(&marker) else {
+            return false;
+        };
+        let recorded = PathBuf::from(text.trim());
+        if !recorded.starts_with(self.paths.php_dir(removed)) {
+            return false;
+        }
+        let Ok(version) = self.default_php() else {
+            return false;
+        };
+        let php = self.paths.php_dir(&version).join("php.exe");
+        crate::composer::set_php(&self.paths, &php).is_ok()
+    }
+
     pub async fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<()> {
         let site = self
             .config
@@ -511,6 +657,31 @@ fn folder_name(path: &Path) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or("site")
         .to_string()
+}
+
+/// Windows kadang masih memegang handle sebentar setelah proses mati, jadi
+/// penghapusan dicoba beberapa kali sebelum menyerah.
+fn remove_php_dir(paths: &Paths, version: &str) -> Result<()> {
+    let dir = paths.php_dir(version);
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 0..5 {
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                last = Some(err);
+                if attempt < 4 {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+            }
+        }
+    }
+
+    let err = last.expect("setiap percobaan mengisi galat terakhir");
+    Err(anyhow::Error::from(err)).with_context(|| format!("gagal menghapus {}", dir.display()))
 }
 
 /// Id dipakai sebagai nama file log dan bagian domain, jadi dibatasi ke huruf,

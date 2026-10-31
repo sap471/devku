@@ -43,6 +43,11 @@ impl PhpManager {
         self.paths.php_dir(version).join(Self::binary_name())
     }
 
+    /// Berkas konfigurasi yang dibaca php-cgi lewat `PHPRC`.
+    pub fn ini_path(&self, version: &str) -> PathBuf {
+        self.paths.php_dir(version).join("php.ini")
+    }
+
     /// Versi yang benar-benar bisa dipakai: direktorinya punya binary php-cgi.
     /// Urutannya numerik dan menaik, jadi `last()` selalu versi terbaru
     /// (leksikografis akan menaruh 8.9 di atas 8.10).
@@ -87,7 +92,7 @@ impl PhpManager {
     /// sudah punya php.ini, jangan sentuh.
     pub fn ensure_ini(&self, version: &str) -> Result<PathBuf> {
         let dir = self.paths.php_dir(version);
-        let ini = dir.join("php.ini");
+        let ini = self.ini_path(version);
         if ini.exists() {
             return Ok(ini);
         }

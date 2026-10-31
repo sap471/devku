@@ -114,6 +114,47 @@ impl Runtime {
         Ok(())
     }
 
+    /// Menyalakan ulang satu pool di port yang sama. Dipakai setelah php.ini
+    /// diedit: php-cgi hanya membaca konfigurasi saat prosesnya dimulai, dan
+    /// port yang tidak berubah berarti Caddy tidak perlu di-reload.
+    pub async fn restart_version(
+        &mut self,
+        version: &str,
+        children: u16,
+        paths: &Paths,
+        hook: Option<Hook>,
+    ) -> Result<u16> {
+        let previous = self.ports.remove(version);
+        let mut keep = Vec::new();
+        for (name, supervisor) in self.php.drain(..) {
+            if name == version {
+                supervisor.shutdown().await;
+            } else {
+                keep.push((name, supervisor));
+            }
+        }
+        self.php = keep;
+
+        let Some(port) = previous else {
+            return self.ensure_version(version, children, paths, hook).await;
+        };
+
+        let manager = PhpManager::new(paths.clone());
+        let spec = manager
+            .spec(version, port, children)
+            .with_context(|| format!("menyiapkan PHP {version}"))?;
+
+        let supervisor = Supervisor::start(spec, hook)?;
+        if let Err(reason) = supervisor.wait_ready(Duration::from_secs(20)).await {
+            supervisor.shutdown().await;
+            anyhow::bail!("PHP {version} gagal siap: {reason}");
+        }
+
+        self.ports.insert(version.to_string(), port);
+        self.php.push((version.to_string(), supervisor));
+        Ok(port)
+    }
+
     /// Reload config tanpa mematikan apa pun.
     pub async fn reload(&self, config: &Config, paths: Paths) -> Result<u16> {
         let backend = CaddyBackend::new(paths);
