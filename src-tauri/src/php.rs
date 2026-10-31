@@ -44,6 +44,8 @@ impl PhpManager {
     }
 
     /// Versi yang benar-benar bisa dipakai: direktorinya punya binary php-cgi.
+    /// Urutannya numerik dan menaik, jadi `last()` selalu versi terbaru
+    /// (leksikografis akan menaruh 8.9 di atas 8.10).
     pub fn installed(&self) -> Vec<String> {
         let base = self.paths.engines().join("php");
         let mut out = BTreeSet::new();
@@ -60,7 +62,10 @@ impl PhpManager {
                 }
             }
         }
-        out.into_iter().collect()
+
+        let mut versions: Vec<String> = out.into_iter().collect();
+        versions.sort_by_key(|version| version_key(version));
+        versions
     }
 
     pub fn extract(&self, zip_path: &Path, version: &str) -> Result<PathBuf> {
@@ -142,9 +147,36 @@ impl PhpManager {
     }
 }
 
+/// `8.10.2` > `8.9.0`, juga untuk nama build `8.5.12-1`. Bagian non-angka
+/// diabaikan, cukup untuk memilih kronologi rilis PHP.
+pub fn version_key(version: &str) -> Vec<u64> {
+    version
+        .split(|ch: char| !ch.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse::<u64>().ok())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installed_is_sorted_numerically() {
+        let root = std::env::temp_dir().join(format!("devku-php-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for version in ["8.10.2", "8.9.0", "7.4.33"] {
+            let dir = root.join("engines/php").join(version);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(PhpManager::binary_name()), "").unwrap();
+        }
+
+        let manager = PhpManager::new(Paths { root: root.clone() });
+        assert_eq!(manager.installed(), vec!["7.4.33", "8.9.0", "8.10.2"]);
+        assert_eq!(manager.installed().last().unwrap(), "8.10.2");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn ini_rewrites_extension_dir_and_enables_known_exts() {

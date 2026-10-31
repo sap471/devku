@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
         Some("add-site") => add_site(&args),
         Some("php-path") => php_path(args.get(1).map(String::as_str)),
         Some("up") => up(&args).await,
+        Some("runtimes") => runtimes(),
         Some("trust") => trust().await,
         Some(other) => {
             help();
@@ -62,6 +63,7 @@ fn help() {
          devku-cli add-site <id> <nama> <folder> <versi-php> [domain]\n  \
          devku-cli php-path [on|off]\n  \
          devku-cli up [--seconds N]\n  \
+         devku-cli runtimes\n  \
          devku-cli trust\n\n\
          DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
     );
@@ -197,7 +199,6 @@ fn install_php(zip: &str, version: &str) -> Result<()> {
     let dir = manager.extract(&PathBuf::from(zip), version)?;
 
     let mut config = Config::load(&paths)?;
-    config.php.installed.insert(version.to_string());
     if config.php.active.is_empty() {
         config.php.active = version.to_string();
     }
@@ -304,6 +305,21 @@ fn parse_seconds(args: &[String]) -> Result<Option<u64>> {
         }
     }
     Ok(None)
+}
+
+/// Cermin panel "Runtime" di UI tanpa membuka jendela: apa yang DevKu lihat
+/// sebagai runtime sistem atau bawaan, lengkap dengan jalurnya.
+fn runtimes() -> Result<()> {
+    let paths = Paths::resolve();
+    for runtime in devku_lib::runtime_detect::detect(&paths) {
+        let version = runtime.version.as_deref().unwrap_or("-");
+        let path = runtime.path.as_deref().unwrap_or("");
+        println!(
+            "{:<10} {:<12} {:<10} {}",
+            runtime.name, version, runtime.source, path
+        );
+    }
+    Ok(())
 }
 
 /// Pasang CA lokal Caddy ke trust store, langsung dari CLI. Caddy harus

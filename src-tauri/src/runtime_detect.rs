@@ -26,12 +26,18 @@ impl RuntimeInfo {
 
 /// Urutan penting: runtime sistem menang, binary bawaan hanya cadangan. Ini yang
 /// membuat DevKu tidak menambah salinan Node atau Bun di mesin yang sudah punya.
+/// PHP juga jatuh ke folder `engines/php` kalau `php` tidak ada di PATH: versi
+/// yang sudah diunduh lewat DevKu tidak boleh tampak "tidak terdeteksi" hanya
+/// karena PATH di proses yang sudah lama hidup belum ikut berubah.
 pub fn detect(paths: &Paths) -> Vec<RuntimeInfo> {
+    let php = crate::php::PhpManager::new(paths.clone());
+    let bundled_php = php.installed().last().map(|version| php.binary(version));
+
     vec![
         probe("bun", Some(paths.bundled_binary("bun"))),
         probe("node", None),
         probe("composer", None),
-        probe("php", None),
+        probe("php", bundled_php),
     ]
 }
 

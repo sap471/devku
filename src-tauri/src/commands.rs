@@ -235,6 +235,9 @@ pub struct PhpCatalogEntry {
     #[serde(flatten)]
     pub release: PhpRelease,
     pub installed: bool,
+    /// Berasal dari folder `engines/php`, bukan dari `releases.json`. Tidak
+    /// punya berkas unduhan, jadi UI hanya menampilkannya sebagai terpasang.
+    pub local: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -268,20 +271,74 @@ fn report(
     );
 }
 
-#[tauri::command]
-pub async fn php_catalog(state: State<'_, AppState>) -> Result<Vec<PhpCatalogEntry>, String> {
-    let paths = session_paths(&state).await?;
-    let client = download::client().map_err(error)?;
-    let releases = download::php_releases(&client).await.map_err(error)?;
-    let installed = PhpManager::new(paths).installed();
+#[derive(Serialize)]
+pub struct PhpCatalogView {
+    pub entries: Vec<PhpCatalogEntry>,
+    /// Diisi kalau daftar unduhan tidak bisa diambil. Versi yang sudah ada di
+    /// folder tetap ditampilkan, jadi koneksi mati bukan alasan kehilangan PHP.
+    pub warning: Option<String>,
+}
 
-    Ok(releases
+#[tauri::command]
+pub async fn php_catalog(state: State<'_, AppState>) -> Result<PhpCatalogView, String> {
+    let paths = session_paths(&state).await?;
+    let installed = PhpManager::new(paths).installed();
+    let client = download::client().map_err(error)?;
+    let (releases, warning) = match download::php_releases(&client).await {
+        Ok(list) => (list, None),
+        Err(err) => (
+            Vec::new(),
+            Some(format!(
+                "Daftar versi dari windows.php.net tidak bisa diambil: {err:#}"
+            )),
+        ),
+    };
+
+    let entries = build_catalog(releases, &installed);
+
+    Ok(PhpCatalogView { entries, warning })
+}
+
+/// `8.5.12-1` → `8.5`. Hanya untuk label cabang, bukan keputusan apapun.
+fn branch_of(version: &str) -> String {
+    version.split('.').take(2).collect::<Vec<_>>().join(".")
+}
+
+/// Gabungan rilis resmi dan folder yang sudah ada. Dipisah dari perintah supaya
+/// bisa diuji tanpa jaringan dan tanpa Tauri.
+fn build_catalog(releases: Vec<PhpRelease>, installed: &[String]) -> Vec<PhpCatalogEntry> {
+    let mut entries: Vec<PhpCatalogEntry> = releases
         .into_iter()
         .map(|release| PhpCatalogEntry {
             installed: installed.iter().any(|version| version == &release.version),
+            local: false,
             release,
         })
-        .collect())
+        .collect();
+
+    // Folder yang sudah ada tetap terlihat walau versinya tidak lagi ada di
+    // releases.json: build lama, build custom, atau ekstraksi manual.
+    for version in installed {
+        if entries
+            .iter()
+            .any(|entry| &entry.release.version == version)
+        {
+            continue;
+        }
+        entries.push(PhpCatalogEntry {
+            installed: true,
+            local: true,
+            release: PhpRelease {
+                branch: branch_of(version),
+                version: version.clone(),
+                filename: String::new(),
+                sha256: String::new(),
+                size: String::new(),
+            },
+        });
+    }
+
+    entries
 }
 
 /// Mengunduh, memverifikasi SHA-256 dari releases.json, lalu memasang. Kalau
@@ -602,4 +659,58 @@ pub async fn tail_log(
         .as_ref()
         .ok_or_else(|| unavailable(&state.boot_error))?;
     session.tail_log(&name, lines.unwrap_or(200)).map_err(error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn release(version: &str) -> PhpRelease {
+        PhpRelease {
+            branch: branch_of(version),
+            version: version.to_string(),
+            filename: format!("php-{version}-nts.zip"),
+            sha256: "a".repeat(64),
+            size: "35 MB".to_string(),
+        }
+    }
+
+    #[test]
+    fn catalog_marks_release_installed_from_folder() {
+        let entries = build_catalog(vec![release("8.3.36")], &["8.3.36".to_string()]);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].installed);
+        assert!(!entries[0].local);
+    }
+
+    #[test]
+    fn catalog_adds_folder_versions_absent_from_releases() {
+        let entries = build_catalog(
+            vec![release("8.3.36")],
+            &["8.3.36".to_string(), "8.5.12-1".to_string()],
+        );
+
+        let local = entries
+            .iter()
+            .find(|entry| entry.local)
+            .expect("versi lokal");
+        assert_eq!(local.release.version, "8.5.12-1");
+        assert_eq!(local.release.branch, "8.5");
+        assert!(local.installed);
+        assert!(local.release.filename.is_empty());
+
+        // Rilis resmi tetap hadir, jadi pemasangan versi lain tidak hilang.
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.release.version == "8.3.36")
+        );
+    }
+
+    #[test]
+    fn catalog_stays_usable_without_release_list() {
+        let entries = build_catalog(Vec::new(), &["7.4.33".to_string()]);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].installed && entries[0].local);
+    }
 }

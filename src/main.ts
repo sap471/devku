@@ -59,6 +59,12 @@ interface PhpCatalogEntry {
   sha256: string;
   size: string;
   installed: boolean;
+  local: boolean;
+}
+
+interface PhpCatalogView {
+  entries: PhpCatalogEntry[];
+  warning: string | null;
 }
 
 interface DownloadProgress {
@@ -111,6 +117,7 @@ let runtimesError: string | null = null;
 
 let phpCatalog: PhpCatalogEntry[] | null = null;
 let phpCatalogError: string | null = null;
+let phpCatalogWarning: string | null = null;
 let phpCatalogLoading = false;
 let download: DownloadProgress | null = null;
 
@@ -190,9 +197,12 @@ async function loadPhpCatalog(): Promise<void> {
   paintCatalog();
 
   try {
-    phpCatalog = await invoke<PhpCatalogEntry[]>("php_catalog");
+    const view = await invoke<PhpCatalogView>("php_catalog");
+    phpCatalog = view.entries;
+    phpCatalogWarning = view.warning;
   } catch (err) {
     phpCatalog = [];
+    phpCatalogWarning = null;
     phpCatalogError = String(err);
   } finally {
     phpCatalogLoading = false;
@@ -294,8 +304,13 @@ function renderPhpCatalog(): string {
   if (phpCatalog === null) {
     return '<p class="hint">Mengambil daftar versi dari windows.php.net...</p>';
   }
+
+  const warning = phpCatalogWarning
+    ? `<p class="hint">${esc(phpCatalogWarning)}</p>`
+    : "";
+
   if (phpCatalog.length === 0) {
-    return '<p class="hint">Tidak ada versi yang bisa dipasang.</p>';
+    return `${warning}<p class="hint">Tidak ada versi yang bisa dipasang.</p>`;
   }
 
   const rows = phpCatalog
@@ -320,11 +335,13 @@ function renderPhpCatalog(): string {
 
       return `<div class="catalog-row"><span class="catalog-version">${esc(
         entry.version,
-      )}</span><span class="hint">${esc(entry.size)}</span>${action}</div>`;
+      )}</span><span class="hint">${
+        entry.local ? "folder DevKu" : esc(entry.size)
+      }</span>${action}</div>`;
     })
     .join("");
 
-  return `<div class="catalog">${rows}</div>`;
+  return `${warning}<div class="catalog">${rows}</div>`;
 }
 
 function renderPhpSettings(): string {

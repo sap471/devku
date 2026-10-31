@@ -401,7 +401,6 @@ fn quote(path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::config::{Backend, PhpSettings, Site};
-    use std::collections::BTreeSet;
 
     fn sample_config() -> Config {
         Config {
@@ -411,7 +410,6 @@ mod tests {
             autostart: true,
             https_trusted: false,
             php: PhpSettings {
-                installed: BTreeSet::new(),
                 active: "8.3.36".to_string(),
                 children: 4,
             },

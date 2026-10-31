@@ -39,8 +39,9 @@ fn yes() -> bool {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PhpSettings {
-    #[serde(default)]
-    pub installed: BTreeSet<String>,
+    /// Daftar versi sengaja tidak disimpan di sini: apa yang terpasang dibaca
+    /// langsung dari folder `engines/php`, jadi folder hasil ekstraksi manual
+    /// tetap terdeteksi tanpa perlu mendaftar dulu.
     #[serde(default)]
     pub active: String,
     /// Jumlah worker per versi. 0 = biarkan PHP memakai default-nya.
@@ -55,7 +56,6 @@ fn default_children() -> u16 {
 impl Default for PhpSettings {
     fn default() -> Self {
         Self {
-            installed: BTreeSet::new(),
             active: String::new(),
             children: default_children(),
         }
@@ -100,7 +100,6 @@ impl Default for Config {
             autostart: true,
             https_trusted: false,
             php: PhpSettings {
-                installed: BTreeSet::new(),
                 active: String::new(),
                 children: default_children(),
             },
