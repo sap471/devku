@@ -2,7 +2,7 @@
 
 Tanggal: 2026-10-30
 
-Yang dibangun: mesin di belakang UI. Semua bisa dijalankan headless lewat `devku-cli`, jadi Fase 2 tinggal memanggil fungsi yang sama dari Tauri command.
+Yang dibangun: mesin di belakang UI. Semua bisa dijalankan headless lewat `devku`, jadi Fase 2 tinggal memanggil fungsi yang sama dari Tauri command.
 
 ## Peta modul
 
@@ -17,7 +17,7 @@ Yang dibangun: mesin di belakang UI. Semua bisa dijalankan headless lewat `devku
 | `api.rs` | Klien minimal untuk Caddy admin API (`POST /load`) |
 | `hosts.rs` | Blok hosts bertanda, hanya dipakai saat TLD ≠ `localhost` |
 | `runtime.rs` | Orkestrasi: alokasi port → PHP → Caddy, shutdown bersih |
-| `bin/devku-cli.rs` | Kontrol headless: `status`, `sites`, `check`, `install-php`, `install-caddy`, `add-site`, `up` |
+| `cli.rs` | Kontrol headless: `status`, `sites`, `check`, `install-php`, `install-caddy`, `add-site`, `up` |
 
 ## Keputusan yang diambil saat implementasi
 
@@ -40,7 +40,7 @@ Mencakup: render Caddyfile per site + port terpisah, site nonaktif tidak dirende
 
 ### End-to-end — dua situs, dua versi PHP, port 80
 
-`devku-cli up` dengan Caddy 2.11.7 + PHP 8.3.36 + 7.4.33 yang diekstrak lewat `install-php`:
+`devku up` dengan Caddy 2.11.7 + PHP 8.3.36 + 7.4.33 yang diekstrak lewat `install-php`:
 
 ```
 ready  http://app-a.localhost  php=8.3.36  fpm=127.0.0.1:9002
