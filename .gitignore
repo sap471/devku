@@ -20,6 +20,9 @@ engines/
 target/
 .jara/
 
+# Situs uji lokal, bukan bagian dari aplikasi
+www/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -30,3 +33,5 @@ target/
 *.njsproj
 *.sln
 *.sw?
+
+.commandcode
