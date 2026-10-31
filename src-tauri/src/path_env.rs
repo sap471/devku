@@ -44,12 +44,40 @@ pub fn status(paths: &Paths) -> PathStatus {
 
     PathStatus {
         dir: dir.to_string_lossy().to_string(),
-        registered: user_path()
-            .map(|text| contains(&text, &dir))
-            .unwrap_or(false),
+        registered: is_registered(&dir),
         shim_version,
         broken,
     }
+}
+
+/// Apakah satu folder sudah ada di PATH pengguna. Dipakai juga oleh jalur
+/// Composer global yang tidak lewat shim DevKu.
+pub fn is_registered(dir: &Path) -> bool {
+    user_path()
+        .map(|text| contains(&text, dir))
+        .unwrap_or(false)
+}
+
+/// Menambahkan satu folder ke PATH pengguna tanpa mengubah entri lain. Kalau
+/// sudah ada, tidak ada yang ditulis ulang.
+pub fn add_dir(dir: &Path) -> Result<()> {
+    let text = load_user_path()?;
+    if !contains(&text, dir) {
+        save_user_path(&append(&text, dir))?;
+        broadcast_change();
+    }
+    Ok(())
+}
+
+/// Melepas satu folder dari PATH pengguna. Entri lain dibiarkan apa adanya.
+pub fn remove_dir(dir: &Path) -> Result<()> {
+    let text = load_user_path()?;
+    let next = without(&text, dir);
+    if next != text {
+        save_user_path(&next)?;
+        broadcast_change();
+    }
+    Ok(())
 }
 
 /// Memasang shim `php.bat` yang meneruskan semua argumen ke versi tertentu,
@@ -61,27 +89,13 @@ pub fn register(paths: &Paths, version: &str) -> Result<()> {
     }
 
     write_shim(paths, version, &binary)?;
-
-    let dir = bin_dir(paths);
-    let text = load_user_path()?;
-    if !contains(&text, &dir) {
-        save_user_path(&append(&text, &dir))?;
-        broadcast_change();
-    }
-
-    Ok(())
+    add_dir(&bin_dir(paths))
 }
 
 /// Menghapus folder `bin` dari PATH pengguna dan membuang shim-nya. Entri PATH
 /// lain tidak disentuh.
 pub fn unregister(paths: &Paths) -> Result<()> {
-    let dir = bin_dir(paths);
-    let text = load_user_path()?;
-    let next = without(&text, &dir);
-    if next != text {
-        save_user_path(&next)?;
-        broadcast_change();
-    }
+    remove_dir(&bin_dir(paths))?;
 
     for file in [shim_file(paths), marker_file(paths)] {
         if file.exists() {

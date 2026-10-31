@@ -200,6 +200,13 @@ async fn php_path_dirs(state: &State<'_, AppState>) -> Vec<PathBuf> {
         dirs.push(dir.to_path_buf());
     }
 
+    // Tool global Composer seperti `laravel` langsung bisa dipanggil di
+    // terminal DevKu, tanpa menunggu terminal baru membaca PATH pengguna.
+    let composer_global = crate::composer::global_bin_dir();
+    if composer_global.is_dir() {
+        dirs.push(composer_global);
+    }
+
     dirs
 }
 
@@ -616,6 +623,38 @@ pub async fn disable_php_path(state: State<'_, AppState>) -> Result<Snapshot, St
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
     crate::path_env::unregister(session.paths()).map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+/// Daftarkan folder paket global Composer ke PATH pengguna, supaya `laravel`
+/// dan tool global lain bisa dipanggil dari terminal mana pun.
+#[tauri::command]
+pub async fn enable_composer_global_path(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    let dir = crate::composer::global_bin_dir();
+    if !dir.is_dir() {
+        return Err(format!(
+            "folder Composer global belum ada di {}. Jalankan `composer global require laravel/installer` dulu.",
+            dir.display()
+        ));
+    }
+
+    crate::path_env::add_dir(&dir).map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn disable_composer_global_path(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    crate::path_env::remove_dir(&crate::composer::global_bin_dir()).map_err(error)?;
     Ok(session.snapshot().await)
 }
 

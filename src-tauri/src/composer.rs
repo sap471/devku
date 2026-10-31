@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::{Context, Result, bail};
 use reqwest::Client;
+use serde::Serialize;
 
 use crate::paths::{Paths, write_atomic};
 use crate::php::PhpManager;
@@ -50,6 +51,104 @@ pub fn shim(paths: &Paths) -> PathBuf {
     } else {
         "composer"
     })
+}
+
+/// Folder yang dipakai Composer untuk paket global. Di Windows defaultnya
+/// `%APPDATA%\Composer\vendor\bin`, tempat `laravel.bat` dan tool global lain
+/// dipasang.
+pub fn global_bin_dir() -> PathBuf {
+    if let Some(dir) = env_path("COMPOSER_BIN_DIR") {
+        return dir;
+    }
+
+    let home = composer_home();
+    configured_bin_dir(&home).unwrap_or_else(|| home.join("vendor").join("bin"))
+}
+
+fn composer_home() -> PathBuf {
+    if let Some(home) = env_path("COMPOSER_HOME") {
+        return home;
+    }
+
+    #[cfg(windows)]
+    if let Some(appdata) = env_path("APPDATA") {
+        return appdata.join("Composer");
+    }
+
+    #[cfg(not(windows))]
+    if let Some(home) = env_path("HOME") {
+        return home.join(".composer");
+    }
+
+    PathBuf::from(".composer")
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+/// Composer menyimpan `bin-dir` di config global. Nilai relatif dihitung dari
+/// COMPOSER_HOME, sama seperti yang dilakukan Composer sendiri.
+fn configured_bin_dir(home: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(home.join("config.json")).ok()?;
+    let root: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let value = root.get("config")?.get("bin-dir")?.as_str()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    let path = PathBuf::from(value);
+    Some(if path.is_absolute() {
+        path
+    } else {
+        home.join(path)
+    })
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GlobalStatus {
+    pub dir: String,
+    pub registered: bool,
+    pub exists: bool,
+    /// Nama tool tanpa ekstensi, mis. `laravel` dan `carbon`.
+    pub tools: Vec<String>,
+}
+
+pub fn global_status() -> GlobalStatus {
+    let dir = global_bin_dir();
+    GlobalStatus {
+        dir: dir.to_string_lossy().to_string(),
+        registered: crate::path_env::is_registered(&dir),
+        exists: dir.is_dir(),
+        tools: tools_in(&dir),
+    }
+}
+
+fn tools_in(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| !name.starts_with('.'))
+        .map(|name| {
+            name.strip_suffix(".bat")
+                .or_else(|| name.strip_suffix(".cmd"))
+                .or_else(|| name.strip_suffix(".exe"))
+                .unwrap_or(&name)
+                .to_string()
+        })
+        .collect();
+
+    names.sort();
+    names.dedup();
+    names
 }
 
 pub fn status(paths: &Paths) -> Status {
@@ -346,6 +445,47 @@ mod tests {
         let value = format!("\"{}\";{}", without.display(), with_php.display());
         let found = php_in_path_from(&value, |path| path.exists()).unwrap();
         assert_eq!(found, with_php.join(cli_binary_name()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolves_bin_dir_from_global_config() {
+        let root = std::env::temp_dir().join(format!("devku-composer-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.json"),
+            r#"{"config":{"bin-dir":"vendor/bin"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            configured_bin_dir(&root).unwrap(),
+            root.join("vendor").join("bin")
+        );
+
+        std::fs::write(
+            root.join("config.json"),
+            r#"{"config":{"bin-dir":"C:\\tools\\composer"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            configured_bin_dir(&root).unwrap(),
+            PathBuf::from(r"C:\tools\composer")
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn config_without_bin_dir_falls_back() {
+        let root = std::env::temp_dir().join(format!("devku-composer-cfg2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("config.json"), r#"{"config":{}}"#).unwrap();
+
+        assert_eq!(configured_bin_dir(&root), None);
 
         let _ = std::fs::remove_dir_all(&root);
     }

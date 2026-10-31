@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
         Some("up") => up(&args).await,
         Some("runtimes") => runtimes(),
         Some("install-composer") => install_composer().await,
+        Some("composer-path") => composer_path(args.get(1).map(String::as_str)),
         Some("trust") => trust().await,
         Some(other) => {
             help();
@@ -67,6 +68,7 @@ fn help() {
          devku-cli up [--seconds N]\n  \
          devku-cli runtimes\n  \
          devku-cli install-composer\n  \
+         devku-cli composer-path [on|off]\n  \
          devku-cli trust\n\n\
          DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
     );
@@ -355,6 +357,47 @@ async fn install_composer() -> Result<()> {
         "shim         {}",
         devku_lib::composer::shim(&paths).display()
     );
+    Ok(())
+}
+
+/// Kelola folder paket global Composer di PATH pengguna. Tanpa argumen,
+/// tampilkan lokasi dan tool yang terlihat di dalamnya.
+fn composer_path(mode: Option<&str>) -> Result<()> {
+    let dir = devku_lib::composer::global_bin_dir();
+
+    match mode {
+        Some("on") => {
+            if !dir.is_dir() {
+                bail!(
+                    "folder {} belum ada; jalankan `composer global require laravel/installer` dulu",
+                    dir.display()
+                );
+            }
+            devku_lib::path_env::add_dir(&dir)?;
+            println!("{} ditambahkan ke PATH pengguna", dir.display());
+        }
+        Some("off") => {
+            devku_lib::path_env::remove_dir(&dir)?;
+            println!("{} dilepas dari PATH pengguna", dir.display());
+        }
+        _ => {
+            let status = devku_lib::composer::global_status();
+            println!("folder     {}", status.dir);
+            println!(
+                "di PATH    {}",
+                if status.registered { "ya" } else { "tidak" }
+            );
+            println!(
+                "tools      {}",
+                if status.tools.is_empty() {
+                    "belum ada".to_string()
+                } else {
+                    status.tools.join(", ")
+                }
+            );
+        }
+    }
+
     Ok(())
 }
 

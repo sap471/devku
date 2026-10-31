@@ -66,6 +66,8 @@ pub struct Snapshot {
     /// PHP yang dipakai shim Composer saat ini.
     pub composer_php: Option<String>,
     pub composer_php_missing: bool,
+    /// Folder paket global Composer, tempat `laravel` dan tool lain berada.
+    pub composer_global: crate::composer::GlobalStatus,
     pub sites: Vec<SiteView>,
     pub services: Vec<ServiceView>,
 }
@@ -191,6 +193,7 @@ impl Session {
                 .php
                 .map(|choice| choice.path.to_string_lossy().to_string()),
             composer_php_missing: composer.php_missing,
+            composer_global: crate::composer::global_status(),
             sites,
             services,
         }

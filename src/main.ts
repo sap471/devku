@@ -34,6 +34,7 @@ interface Snapshot {
   composer_version: string | null;
   composer_php: string | null;
   composer_php_missing: boolean;
+  composer_global: ComposerGlobal;
   sites: SiteView[];
   services: ServiceView[];
 }
@@ -43,6 +44,13 @@ interface PathStatus {
   registered: boolean;
   shim_version: string | null;
   broken: boolean;
+}
+
+interface ComposerGlobal {
+  dir: string;
+  registered: boolean;
+  exists: boolean;
+  tools: string[];
 }
 
 interface ServiceView {
@@ -285,6 +293,16 @@ function renderBinaries(): string {
           snapshot.composer_version ? `Composer ${esc(snapshot.composer_version)}` : "Composer"
         }${snapshot.composer_php ? ` · php ${esc(snapshot.composer_php)}` : ""}`;
 
+  const global = snapshot?.composer_global;
+  const tools = global?.tools ?? [];
+  const toolNames =
+    tools.slice(0, 3).join(", ") + (tools.length > 3 ? ` +${tools.length - 3}` : "");
+  const globalDetail = !global?.exists
+    ? "folder belum ada"
+    : tools.length === 0
+      ? "belum ada paket global"
+      : toolNames;
+
   return `
     <div class="path-row">
       <span class="catalog-version">Caddy</span>
@@ -310,6 +328,21 @@ function renderBinaries(): string {
       <span class="hint">${composerHint}</span>
       <span class="spacer"></span>
       ${downloadButton("composer")}
+    </div>
+    <div class="path-row">
+      <span class="catalog-version">Composer global</span>
+      ${global?.registered ? '<span class="tag">di PATH</span>' : '<span class="tag">belum</span>'}
+      <span class="hint">${esc(global?.dir ?? "")} · ${esc(globalDetail)}</span>
+      <span class="spacer"></span>
+      ${
+        global?.registered
+          ? `<button class="btn btn-quiet" type="button" data-action="disable-composer-global" ${
+              busy ? "disabled" : ""
+            }>Lepas</button>`
+          : `<button class="btn" type="button" data-action="enable-composer-global" ${
+              global?.exists && !busy ? "" : "disabled"
+            }>Daftarkan</button>`
+      }
     </div>
     <div class="path-row">
       <span class="catalog-version">HTTPS lokal</span>
@@ -491,6 +524,26 @@ async function setPhpPath(enable: boolean): Promise<void> {
     notice = enable
       ? `Gagal mendaftarkan PHP ke PATH: ${String(err)}`
       : `Gagal melepas PHP dari PATH: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function setComposerGlobalPath(enable: boolean): Promise<void> {
+  busy = "composer-global";
+  notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>(
+      enable ? "enable_composer_global_path" : "disable_composer_global_path",
+    );
+    applySnapshot(next);
+  } catch (err) {
+    notice = enable
+      ? `Gagal mendaftarkan Composer global ke PATH: ${String(err)}`
+      : `Gagal melepas Composer global dari PATH: ${String(err)}`;
   } finally {
     busy = null;
     render();
@@ -977,7 +1030,7 @@ function renderDetail(): void {
         ${body}
 
         <div class="log-head">
-          <h3>Binary DevKu</h3>
+          <h3>Binary dan PATH</h3>
         </div>
         <div id="binaries">${renderBinaries()}</div>
 
@@ -1526,6 +1579,12 @@ document.addEventListener("click", (event) => {
       break;
     case "disable-php-path":
       void setPhpPath(false);
+      break;
+    case "enable-composer-global":
+      void setComposerGlobalPath(true);
+      break;
+    case "disable-composer-global":
+      void setComposerGlobalPath(false);
       break;
     case "install-caddy":
       void installBinary("caddy");
