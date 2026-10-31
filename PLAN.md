@@ -8,8 +8,9 @@ Development environment untuk PHP di Windows: ringan, multi-PHP per domain, teri
 - [x] **Fase 1** — Core services: Caddy manager, php-cgi pool + supervisor, port allocator → [hasil](docs/fase-1.md)
 - [x] **Fase 2** — Project manager: UI daftar + wizard + unduh/pasang PHP dari aplikasi
 - [x] **Fase 3** — Runtime integration: deteksi runtime, terminal PTY, script runner, unduh Caddy/Bun/Composer → [hasil](docs/fase-3.md)
-- [ ] **Fase 4** — Polish & distribusi: tray, SSL trust, onboarding, export config, dan auto-start login selesai; sisa installer NSIS dan auto-update
+- [x] **Fase 4** — Polish: tray, SSL trust, onboarding, export/import config, auto-start login
 - [ ] **Fase 5 (v2)** — Pluggable backend: Apache sebagai opsi via Caddy reverse proxy
+- [ ] **Fase 6 (nanti)** — Distribusi: installer NSIS dan auto-update bertanda tangan
 
 ---
 
@@ -291,7 +292,7 @@ Selesai bila: tidak ada binary ganda saat Bun/Node sudah terpasang, dan TS bisa 
 
 **Terverifikasi:** 76 unit test lulus; unduhan sungguhan untuk PHP 8.3 (SHA-256), Caddy 2.11.7 (SHA-512 dari `checksums.txt`, lalu `caddy version` dijalankan), Bun 1.4.4 (`bun --version` dibandingkan dengan tag rilis), dan Composer 2.11.1; pendaftaran `php` ke PATH pengguna diuji naik-turun dengan PATH kembali identik. Detail: [`docs/fase-3.md`](docs/fase-3.md).
 
-### Fase 4 — Polish & distribusi
+### Fase 4 — Polish ✅
 
 Deliverable:
 - [x] Tray icon: start/stop semua, buka browser, keluar (`3fcd348`).
@@ -300,12 +301,10 @@ Deliverable:
 - [x] Onboarding first-run: deteksi runtime, tawaran pasang Caddy, pilih PHP, lalu situs pertama. Status langkah dibaca dari keadaan nyata, bukan progres tersimpan.
 - [x] Export/import `config.json`. Impor melewati folder yang tidak ada, menonaktifkan situs dengan PHP belum terpasang, dan tidak menyalin status trust antar mesin.
 - [x] Auto-start saat login: nilai `HKCU\...\Run` berisi `"devku.exe" --hidden`; dibuka tanpa jendela, service langsung menyala. Bisa dilepas lagi dari UI atau `devku-cli autostart off`.
-- [ ] Auto-update via Tauri updater. Butuh kunci tanda tangan dan endpoint rilis dulu.
-- [ ] Installer NSIS: tanpa PHP binary, unduh on-demand saat pertama pilih versi. `bundle.targets` masih `"all"` dan belum pernah diuji di mesin bersih.
 
-Selesai bila: installer jalan di mesin Windows bersih, first-run selesai tanpa langkah manual.
+Selesai bila: DevKu bisa dipakai harian tanpa membuka jendela, dan environment bisa dibagikan lewat berkas config.
 
-Urutan sisa: installer NSIS → auto-update.
+**Dipindah ke Fase 6:** installer NSIS dan auto-update. Keduanya butuh keputusan distribusi (kunci tanda tangan, endpoint rilis, host berkas) yang belum ada.
 
 ### Fase 5 — Pluggable backend (v2)
 
@@ -320,6 +319,17 @@ Deliverable:
 - Migrasi site antar backend tanpa mengubah folder.
 
 Selesai bila: satu site `backend: apache` dengan `.htaccess` custom dan satu site `backend: caddy` berjalan bersamaan di port 80, dan Apache mati total saat site Apache dinonaktifkan.
+
+### Fase 6 — Distribusi (nanti)
+
+Dikerjakan setelah ada keputusan rilis: kunci tanda tangan updater, endpoint pembaruan, dan tempat menyimpan berkas installer.
+
+Deliverable:
+- Installer NSIS: `bundle.targets: ["nsis"]`, instalasi per-user tanpa admin, tanpa PHP binary di paket. PHP diunduh saat versi pertama dipilih di UI.
+- Auto-update via Tauri updater: `tauri-plugin-updater`, kunci publik di config, endpoint rilis, dan tampilan versi di UI.
+- Halaman rilis berisi hash dan catatan perubahan, supaya unduhan bisa diverifikasi.
+
+Selesai bila: installer jalan di mesin Windows bersih tanpa langkah manual, dan versi lama bisa memperbarui diri lewat tanda tangan yang valid.
 
 ---
 
@@ -360,3 +370,5 @@ Fase 0 ──► Fase 1 ──► Fase 2 ──► Fase 3 ──► Fase 4 ─�
 ```
 
 Fase 2 selesai = sudah bisa dipakai sendiri untuk kerja harian. Mulai dari situ, feedback nyata mengoreksi prioritas Fase 3–4.
+
+Fase 6 (distribusi) menyusul kapan saja setelah Fase 4, tergantung kesiapan kunci tanda tangan dan host rilis. Fase 5 tidak menunggunya.
