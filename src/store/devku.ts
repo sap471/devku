@@ -10,6 +10,8 @@ import type {
   PhpCatalogView,
   PhpExtensionsView,
   DownloadProgress,
+  MoveProgress,
+  MoveReport,
   ImportResponse,
   ImportReport,
   PhpRemoval,
@@ -92,6 +94,7 @@ export const state = reactive({
   phpExtensionsVersion: "",
 
   download: null as DownloadProgress | null,
+  moveProgress: null as MoveProgress | null,
 
   siteCommands: null as SiteCommand[] | null,
   commandsFor: null as string | null,
@@ -361,8 +364,64 @@ export async function setApachePort(port: number): Promise<void> {
   }
 }
 
-export async function loadOpenTargets(id: string): Promise<void> {
+/// Workspace hanya menentukan folder awal, jadi tidak perlu service restart.
+export async function setWorkspace(path: string | null): Promise<void> {
+  state.busy = "workspace";
+  state.notice = null;
   try {
+    const next = await invoke<Snapshot>("set_workspace", { path });
+    applySnapshot(next);
+    state.infoNotice = path ? "Folder workspace diperbarui." : "Workspace kembali ke lokasi bawaan.";
+  } catch (err) {
+    state.notice = `Gagal menyimpan workspace: ${String(err)}`;
+  } finally {
+    state.busy = null;
+  }
+}
+
+export async function openWorkspace(): Promise<void> {
+  try {
+    await invoke("open_in", { kind: "workspace", id: null, target: "explorer" });
+  } catch (err) {
+    state.notice = `Gagal membuka workspace: ${String(err)}`;
+  }
+}
+
+export async function openDataRoot(): Promise<void> {
+  try {
+    await invoke("open_in", { kind: "data", id: null, target: "explorer" });
+  } catch (err) {
+    state.notice = `Gagal membuka folder data: ${String(err)}`;
+  }
+}
+
+/// Memindahkan folder data. Service berhenti, penyalinan berjalan dengan
+/// progres, lalu aplikasi dimulai ulang supaya semua jalur ikut pindah.
+export async function moveDataHome(path: string): Promise<void> {
+  state.busy = "move-data";
+  state.notice = null;
+  state.moveProgress = { done: 0, total: 0 };
+
+  let unlisten: UnlistenFn | null = null;
+  try {
+    unlisten = await listen<MoveProgress>("location://progress", (event) => {
+      state.moveProgress = event.payload;
+    });
+
+    const report = await invoke<MoveReport>("move_data_home", { path });
+    state.infoNotice =
+      `Data dipindahkan ke ${report.home} (${report.files} berkas). DevKu akan dimulai ulang.`;
+    await invoke("restart_app");
+  } catch (err) {
+    state.notice = `Gagal memindahkan folder data: ${String(err)}`;
+  } finally {
+    unlisten?.();
+    state.busy = null;
+    state.moveProgress = null;
+  }
+}
+
+export async function loadOpenTargets(id: string): Promise<void> {  try {
     state.openMenuItems = await invoke<OpenTarget[]>("open_targets", { id });
     state.openMenuError = null;
   } catch (err) {

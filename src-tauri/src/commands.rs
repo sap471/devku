@@ -698,6 +698,133 @@ pub async fn set_apache_port(state: State<'_, AppState>, port: u16) -> Result<Sn
     Ok(session.snapshot().await)
 }
 
+/// Folder induk project, bukan folder data. `None` mengembalikan ke bawaan.
+#[tauri::command]
+pub async fn set_workspace(
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.set_workspace(path).await.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[derive(Clone, Serialize)]
+struct MoveProgress {
+    done: u64,
+    total: u64,
+}
+
+#[derive(Serialize)]
+pub struct MoveReport {
+    pub home: String,
+    pub files: u64,
+    pub bytes: u64,
+}
+
+/// Memindahkan folder data ke lokasi lain. Service dihentikan dulu karena
+/// berkas engine dan database sedang dipegang proses yang berjalan, lalu
+/// penunjuk ditulis setelah salinan lengkap. Aplikasi wajib dimulai ulang
+/// sesudahnya, dan UI yang memicunya.
+#[tauri::command]
+pub async fn move_data_home(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<MoveReport, String> {
+    if crate::location::env_home().is_some() {
+        return Err("DEVKU_HOME sedang diset, lokasi data dikunci environment".to_string());
+    }
+
+    let current = {
+        let guard = state.session.lock().await;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| unavailable(&state.boot_error))?;
+        session.paths().root.clone()
+    };
+
+    let target = PathBuf::from(path.trim());
+    crate::location::validate_target(&current, &target).map_err(error)?;
+
+    // Shim di `bin/` menulis jalur absolut ke PHP, jadi setelah pindah harus
+    // ditulis ulang dan entri PATH lama harus diganti. Dicatat sebelum
+    // service dihentikan karena statusnya dibaca dari PATH pengguna.
+    let old_paths = Paths {
+        root: current.clone(),
+    };
+    let registered = crate::path_env::is_registered(&crate::path_env::bin_dir(&old_paths));
+    let shim_version = crate::path_env::status(&old_paths).shim_version;
+
+    {
+        let mut guard = state.session.lock().await;
+        if let Some(session) = guard.as_mut() {
+            session.stop().await;
+        }
+    }
+
+    let from = current.clone();
+    let to = target.clone();
+    let copy_target = to.clone();
+    let emitter = app.clone();
+    let totals = tokio::task::spawn_blocking(move || {
+        let mut last = std::time::Instant::now();
+        crate::location::copy_tree(&from, &copy_target, &mut |done, total| {
+            // Ratusan MB: laporan per berkas akan membanjiri channel.
+            if last.elapsed() >= std::time::Duration::from_millis(120) {
+                last = std::time::Instant::now();
+                let _ = emitter.emit("location://progress", MoveProgress { done, total });
+            }
+        })
+    })
+    .await
+    .map_err(|err| format!("pemindahan gagal dijalankan: {err}"))?
+    .map_err(error)?;
+
+    let default_home = crate::paths::default_home();
+    crate::location::write_pointer(&default_home, &to).map_err(error)?;
+
+    // Penunjuk sudah benar. Sisa pekerjaan bersifat pembersihan: kegagalan di
+    // sini tidak boleh membuat pemindahan dianggap gagal.
+    let new_paths = Paths { root: to.clone() };
+    if registered {
+        let _ = crate::path_env::remove_dir(&crate::path_env::bin_dir(&old_paths));
+        let _ = crate::path_env::add_dir(&crate::path_env::bin_dir(&new_paths));
+    }
+    if let Some(version) = shim_version {
+        let _ = crate::path_env::sync_shim(&new_paths, &version);
+    }
+
+    // Salinan sudah lengkap dan penunjuk sudah menunjuk ke sana, jadi sisa
+    // folder lama cukup dibersihkan tanpa membatalkan pemindahan.
+    let _ = crate::location::prune_source(&current);
+
+    let _ = app.emit(
+        "location://progress",
+        MoveProgress {
+            done: totals.bytes,
+            total: totals.bytes,
+        },
+    );
+
+    Ok(MoveReport {
+        home: to.to_string_lossy().to_string(),
+        files: totals.files,
+        bytes: totals.bytes,
+    })
+}
+
+/// Dipanggil setelah folder data berpindah. Service belum menyala di proses
+/// lama karena sudah dihentikan sebelum penyalinan.
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 #[tauri::command]
 pub async fn set_default_php(
     state: State<'_, AppState>,
@@ -1167,6 +1294,7 @@ pub async fn open_in(
 
         match kind.as_str() {
             "data" => session.paths().root.clone(),
+            "workspace" => session.config().workspace_dir(),
             "site" => {
                 let id = id.ok_or_else(|| "situs tidak dipilih".to_string())?;
                 let site = session

@@ -2,15 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// Semua state DevKu tinggal di satu root supaya bisa dipindah/dihapus utuh.
-pub fn home() -> PathBuf {
-    if let Some(custom) = std::env::var("DEVKU_HOME")
-        .ok()
-        .filter(|value| !value.is_empty())
-    {
-        return PathBuf::from(custom);
-    }
-
+/// Folder data bawaan, sekaligus tempat berkas penunjuk lokasi kustom. Nilai
+/// ini tidak pernah berubah walau data dipindah, jadi DevKu selalu tahu ke
+/// mana harus membaca penunjuk.
+pub fn default_home() -> PathBuf {
     #[cfg(windows)]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
@@ -29,6 +24,42 @@ pub fn home() -> PathBuf {
     }
 
     PathBuf::from(".devku")
+}
+
+/// Semua state DevKu tinggal di satu root supaya bisa dipindah/dihapus utuh.
+/// `DEVKU_HOME` menang, lalu penunjuk dari Pengaturan, lalu folder bawaan.
+pub fn home() -> PathBuf {
+    let default = default_home();
+    crate::location::resolve(&default, crate::location::env_home()).0
+}
+
+/// Folder home pengguna, dasar untuk lokasi bawaan workspace. Workspace
+/// sengaja tidak ikut folder data: project adalah isi, bukan state aplikasi.
+pub fn user_home() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var("USERPROFILE")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    #[cfg(not(windows))]
+    {
+        std::env::var("HOME")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+}
+
+/// Lokasi bawaan folder `sites/`. Dipakai wizard dan tombol buka workspace
+/// selama pengguna belum memilih sendiri.
+pub fn default_workspace() -> PathBuf {
+    match user_home() {
+        Some(home) => home.join("DevKu").join("sites"),
+        None => default_home().join("sites"),
+    }
 }
 
 #[derive(Clone, Debug)]

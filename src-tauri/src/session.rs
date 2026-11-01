@@ -135,6 +135,10 @@ pub struct Snapshot {
     pub config_path: String,
     /// Folder data DevKu: config, engines, runtime, dan log.
     pub home_path: String,
+    /// Folder induk project untuk wizard dan tombol buka.
+    pub workspace: WorkspaceView,
+    /// Asal folder data, untuk menjelaskan dari mana nilainya datang.
+    pub data_location: DataLocationView,
     /// Nilai Run di registry untuk binary yang sedang berjalan, bukan sekadar
     /// catatan config: user bisa mencabutnya lewat Task Manager.
     pub start_at_login: bool,
@@ -167,6 +171,31 @@ pub struct ApacheView {
 pub struct DownloadsView {
     pub files: usize,
     pub bytes: u64,
+}
+
+/// Folder induk project. Dipakai wizard sebagai titik awal dan tombol buka
+/// folder, bukan sebagai daftar situs: situs tetap didaftarkan eksplisit.
+#[derive(Clone, Debug, Serialize)]
+pub struct WorkspaceView {
+    pub path: String,
+    /// true kalau pengguna memilih sendiri, false kalau masih bawaan.
+    pub custom: bool,
+    pub exists: bool,
+}
+
+/// Di mana folder data berada. Penunjuk dipisahkan dari `home_path` supaya
+/// UI bisa menjelaskan asal nilainya dan menolak perubahan saat dikunci
+/// environment.
+#[derive(Clone, Debug, Serialize)]
+pub struct DataLocationView {
+    /// Folder data bawaan, tempat berkas penunjuk tinggal.
+    pub default_home: String,
+    /// Penunjuk lokasi kustom, null selama data masih di folder bawaan.
+    pub pointer: Option<String>,
+    /// "default", "environment", "custom", atau "invalid".
+    pub source: String,
+    /// `DEVKU_HOME` sedang diset, jadi lokasi tidak bisa diubah dari UI.
+    pub locked: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -363,6 +392,28 @@ impl Session {
             composer_global: crate::composer::global_status(),
             config_path: self.paths.config_file().to_string_lossy().to_string(),
             home_path: self.paths.root.to_string_lossy().to_string(),
+            workspace: {
+                let dir = self.config.workspace_dir();
+                WorkspaceView {
+                    exists: dir.is_dir(),
+                    path: dir.to_string_lossy().to_string(),
+                    custom: self.config.workspace.is_some(),
+                }
+            },
+            data_location: {
+                let default_home = crate::paths::default_home();
+                let (_, source) =
+                    crate::location::resolve(&default_home, crate::location::env_home());
+                let pointer = crate::location::pointer_file(&default_home);
+                DataLocationView {
+                    pointer: pointer
+                        .is_file()
+                        .then(|| pointer.to_string_lossy().to_string()),
+                    default_home: default_home.to_string_lossy().to_string(),
+                    source: source.tag().to_string(),
+                    locked: source == crate::location::Source::Env,
+                }
+            },
             start_at_login: crate::autostart::is_enabled(&crate::autostart::running_exe()),
             sites,
             services,
@@ -509,10 +560,33 @@ impl Session {
         self.refresh().await
     }
 
+    /// Menetapkan folder induk project. `None` mengembalikannya ke lokasi
+    /// bawaan. Folder dibuat sekarang supaya pilihan di UI tidak menunjuk
+    /// tempat yang tidak ada.
+    pub async fn set_workspace(&mut self, path: Option<String>) -> Result<()> {
+        let chosen = path
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        match chosen {
+            Some(text) => {
+                let dir = PathBuf::from(&text);
+                if !dir.is_absolute() {
+                    bail!("folder workspace harus jalur absolut");
+                }
+                std::fs::create_dir_all(&dir)
+                    .with_context(|| format!("gagal membuat {}", dir.display()))?;
+                self.config.workspace = Some(dir);
+            }
+            None => self.config.workspace = None,
+        }
+
+        self.config.save(&self.paths)
+    }
+
     /// Berhenti tanpa mematikan service lain, dipakai sebelum memasang ulang
     /// Apache karena berkas httpd.exe yang berjalan tidak bisa ditimpa.
-    pub async fn stop_apache(&mut self) {
-        if let Some(runtime) = self.runtime.as_mut() {
+    pub async fn stop_apache(&mut self) {        if let Some(runtime) = self.runtime.as_mut() {
             runtime.stop_apache().await;
         }
     }

@@ -19,6 +19,11 @@ import {
   askRemoveDatabase,
   openBackups,
   openDataFolder,
+  openDataRoot,
+  openWorkspace,
+  setWorkspace,
+  moveDataHome,
+  promptDialog,
   trustCaddy,
   setApachePort,
   setComposerGlobalPath,
@@ -29,6 +34,7 @@ import {
   importConfig,
   type SettingsSubTab,
 } from "../../store/devku";
+import { open } from "@tauri-apps/plugin-dialog";
 import { formatBytes } from "../../log-format";
 
 onMounted(() => {
@@ -65,6 +71,64 @@ async function saveApachePort() {
     return;
   }
   await setApachePort(port);
+}
+
+const dataLocation = computed(() => state.snapshot?.data_location);
+const workspace = computed(() => state.snapshot?.workspace);
+const movePercent = computed(() => {
+  const progress = state.moveProgress;
+  if (!progress || !progress.total) return 0;
+  return Math.min(100, Math.round((progress.done / progress.total) * 100));
+});
+
+/// Memindahkan folder data menyalin ratusan MB, jadi selalu lewat konfirmasi
+/// yang menyebut folder asal dan tujuan.
+async function pickDataFolder(): Promise<void> {
+  if (dataLocation.value?.locked || state.busy === "move-data") return;
+  try {
+    const selected = await open({
+      title: "Pilih folder data baru (harus kosong)",
+      multiple: false,
+      directory: true,
+    });
+    if (typeof selected !== "string") return;
+
+    const answer = await promptDialog({
+      title: "Pindahkan folder data",
+      body: "Isi folder data disalin ke folder baru, service dihentikan selama penyalinan, lalu DevKu dimulai ulang. Folder lama dikosongkan setelah salinan selesai.",
+      rows: [
+        { label: "Dari", value: state.snapshot?.home_path ?? "" },
+        { label: "Ke", value: selected },
+      ],
+      choices: [{ id: "move", label: "Pindahkan", variant: "primary" }],
+      tone: "warning",
+      cancelLabel: "Batal",
+    });
+    if (answer?.choice !== "move") return;
+
+    await moveDataHome(selected);
+  } catch (err) {
+    state.notice = `Gagal memilih folder data: ${String(err)}`;
+  }
+}
+
+async function pickWorkspace(): Promise<void> {
+  try {
+    const selected = await open({
+      title: "Pilih folder workspace",
+      multiple: false,
+      directory: true,
+      defaultPath: workspace.value?.exists ? workspace.value.path : undefined,
+    });
+    if (typeof selected !== "string") return;
+    await setWorkspace(selected);
+  } catch (err) {
+    state.notice = `Gagal memilih folder workspace: ${String(err)}`;
+  }
+}
+
+async function resetWorkspace(): Promise<void> {
+  await setWorkspace(null);
 }
 
 /// Versi pilihan tab Ekstensi: yang dipilih user, atau default global,
@@ -823,6 +887,108 @@ function setTab(tab: SettingsSubTab) {
           </div>
         </div>
 
+        <!-- Storage & Workspace -->
+        <div class="card">
+          <div class="card-head">
+            <h3 class="card-title">Penyimpanan & Workspace</h3>
+          </div>
+          <div class="card-body">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-name">Folder Data</span>
+                <span class="setting-desc">
+                  <code class="path-value">{{ state.snapshot?.home_path }}</code>
+                </span>
+                <span class="setting-desc">
+                  <template v-if="dataLocation?.source === 'environment'">
+                    Dikunci variabel <code>DEVKU_HOME</code>, jadi tidak bisa diubah dari sini.
+                  </template>
+                  <template v-else-if="dataLocation?.source === 'custom'">
+                    Dipindahkan lewat halaman ini. Penunjuk tersimpan di
+                    <code>{{ dataLocation.pointer }}</code>.
+                  </template>
+                  <template v-else-if="dataLocation?.source === 'invalid'">
+                    Berkas penunjuk tidak terbaca, sementara memakai folder bawaan
+                    <code>{{ dataLocation.default_home }}</code>.
+                  </template>
+                  <template v-else> Lokasi bawaan aplikasi, tidak ada penunjuk kustom. </template>
+                </span>
+              </div>
+              <div class="setting-ctrl flex-gap">
+                <button class="btn btn-sm btn-outline" type="button" @click="openDataRoot()">
+                  Buka
+                </button>
+                <button
+                  class="btn btn-sm btn-outline"
+                  type="button"
+                  :disabled="dataLocation?.locked || state.busy === 'move-data'"
+                  @click="pickDataFolder()"
+                >
+                  {{ state.busy === 'move-data' ? 'Memindahkan...' : 'Ubah Lokasi' }}
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-if="state.moveProgress"
+              class="move-progress"
+              role="progressbar"
+              aria-label="Kemajuan pemindahan folder data"
+              :aria-valuenow="movePercent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div class="move-progress-track">
+                <div class="move-progress-fill" :style="{ width: `${movePercent}%` }"></div>
+              </div>
+              <span class="move-progress-label">
+                {{ movePercent }}% ·
+                {{ formatBytes(state.moveProgress.done) }} / {{ formatBytes(state.moveProgress.total) }}
+              </span>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-name">Folder Workspace</span>
+                <span class="setting-desc">
+                  <code class="path-value">{{ workspace?.path }}</code>
+                </span>
+                <span class="setting-desc">
+                  <template v-if="!workspace?.exists">
+                    Folder belum ada dan dibuat otomatis saat dipakai.
+                  </template>
+                  <template v-else>
+                    Folder induk project. Wizard memakai folder ini sebagai titik awal, dan project di
+                    dalamnya tetap didaftarkan sendiri.
+                  </template>
+                </span>
+              </div>
+              <div class="setting-ctrl flex-gap">
+                <button class="btn btn-sm btn-outline" type="button" @click="openWorkspace()">
+                  Buka
+                </button>
+                <button
+                  class="btn btn-sm btn-outline"
+                  type="button"
+                  :disabled="state.busy === 'workspace'"
+                  @click="pickWorkspace()"
+                >
+                  {{ workspace?.custom ? 'Ganti' : 'Pilih' }}
+                </button>
+                <button
+                  v-if="workspace?.custom"
+                  class="btn btn-sm btn-quiet"
+                  type="button"
+                  :disabled="state.busy === 'workspace'"
+                  @click="resetWorkspace()"
+                >
+                  Bawaan
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- DevKu App Configuration & Backups -->
         <div class="card">
           <div class="card-head">
@@ -1076,6 +1242,38 @@ function setTab(tab: SettingsSubTab) {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.4;
+  word-break: break-word;
+}
+
+.path-value {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.move-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 12px;
+}
+
+.move-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.move-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+.move-progress-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .setting-ctrl {

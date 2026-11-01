@@ -70,6 +70,11 @@ pub struct Config {
     pub backend: Backend,
     #[serde(default = "default_tld")]
     pub tld: String,
+    /// Folder induk project. Kosong berarti `%USERPROFILE%\DevKu\sites`.
+    /// Isi project sengaja tidak ikut folder data supaya memindahkan data
+    /// aplikasi tidak menyentuh project.
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
     /// Menyalakan service begitu aplikasi dibuka. Bisa dimatikan di config.
     #[serde(default = "yes")]
     pub autostart: bool,
@@ -151,6 +156,7 @@ impl Default for Config {
             version: 1,
             backend: Backend::Caddy,
             tld: default_tld(),
+            workspace: None,
             autostart: true,
             https_trusted: false,
             onboarded: false,
@@ -206,6 +212,15 @@ impl Config {
     /// pintu masuk, termasuk untuk situs yang backend-nya Apache.
     pub fn site_url(&self, site: &Site) -> String {
         format!("http://{}/", site.domain)
+    }
+
+    /// Folder induk project yang sedang berlaku. Nilai kosong berarti lokasi
+    /// bawaan, bukan berarti "tidak ada workspace".
+    pub fn workspace_dir(&self) -> PathBuf {
+        self.workspace
+            .clone()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(crate::paths::default_workspace)
     }
 
     pub fn domain_for(&self, id: &str) -> String {
@@ -281,6 +296,16 @@ mod tests {
     fn old_config_without_onboarded_starts_unonboarded() {
         let config: Config = serde_json::from_str(r#"{"version":1}"#).unwrap();
         assert!(!config.onboarded);
+    }
+
+    #[test]
+    fn workspace_uses_choice_and_falls_back_to_default() {
+        let config: Config = serde_json::from_str(r#"{"version":1}"#).unwrap();
+        assert_eq!(config.workspace_dir(), crate::paths::default_workspace());
+
+        let config: Config =
+            serde_json::from_str(r#"{"version":1,"workspace":"D:\\projects"}"#).unwrap();
+        assert_eq!(config.workspace_dir(), PathBuf::from("D:\\projects"));
     }
 
     #[test]

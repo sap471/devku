@@ -44,10 +44,13 @@ function reset() {
 
 async function pickFolder() {
   try {
+    const workspace = state.snapshot?.workspace;
     const selected = await open({
       title: "Pilih folder project PHP",
       multiple: false,
       directory: true,
+      // Workspace hanya titik awal; folder project tetap bebas di mana saja.
+      defaultPath: workspace?.exists ? workspace.path : undefined,
     });
     if (typeof selected === "string") {
       projectPath.value = selected;

@@ -171,6 +171,37 @@ export interface ApacheView {
   detail: string | null;
 }
 
+export interface WorkspaceView {
+  path: string;
+  /** true kalau pengguna memilih sendiri, false kalau masih bawaan. */
+  custom: boolean;
+  exists: boolean;
+}
+
+export interface DataLocationView {
+  /** Folder data bawaan, tempat berkas penunjuk tinggal. */
+  default_home: string;
+  /** Penunjuk lokasi kustom, null selama data masih di folder bawaan. */
+  pointer: string | null;
+  /** "default", "environment", "custom", atau "invalid". */
+  source: "default" | "environment" | "custom" | "invalid";
+  /** DEVKU_HOME mengunci lokasi, jadi UI tidak boleh menawarkan ubah. */
+  locked: boolean;
+}
+
+/** Laporan pemindahan folder data. */
+export interface MoveReport {
+  home: string;
+  files: number;
+  bytes: number;
+}
+
+/** Kemajuan penyalinan folder data, dikirim selama pemindahan berjalan. */
+export interface MoveProgress {
+  done: number;
+  total: number;
+}
+
 export interface Snapshot {
   tld: string;
   running: boolean;
@@ -187,6 +218,10 @@ export interface Snapshot {
   composer_global: ComposerGlobal;
   config_path: string;
   home_path: string;
+  /** Folder induk project, dipakai wizard dan tombol buka folder. */
+  workspace: WorkspaceView;
+  /** Asal folder data, untuk menjelaskan dari mana nilainya datang. */
+  data_location: DataLocationView;
   start_at_login: boolean;
   sites: SiteView[];
   services: ServiceView[];

@@ -119,7 +119,8 @@ fn help_text() -> &'static str {
      devku import-config <berkas>\n  \
      devku trust\n\n\
      Exit code: 0 sukses, 1 gagal, 2 perintah tidak dikenal.\n\
-     DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
+     DEVKU_HOME mengubah lokasi config/engines dan mengunci pemindahan\n\
+     dari UI (default: %APPDATA%\\DevKu)."
 }
 
 fn php_path(mode: Option<&str>) -> Result<()> {
@@ -182,6 +183,7 @@ fn status() -> Result<()> {
 
     println!("home         {}", paths.root.display());
     println!("config       {}", paths.config_file().display());
+    println!("workspace    {}", config.workspace_dir().display());
     println!("tld          {}", config.tld);
     println!("backend      {:?}", config.backend);
     println!(

@@ -14,6 +14,7 @@ pub mod download;
 pub mod extensions;
 pub mod hosts;
 pub mod launcher;
+pub mod location;
 pub mod path_env;
 pub mod paths;
 pub mod php;
@@ -95,6 +96,9 @@ pub fn run() {
             commands::set_site_php,
             commands::set_site_backend,
             commands::set_apache_port,
+            commands::set_workspace,
+            commands::move_data_home,
+            commands::restart_app,
             commands::set_default_php,
             commands::enable_php_path,
             commands::disable_php_path,

@@ -443,6 +443,7 @@ mod tests {
             version: 1,
             backend: Backend::Caddy,
             tld: "localhost".to_string(),
+            workspace: None,
             autostart: true,
             https_trusted: false,
             onboarded: false,

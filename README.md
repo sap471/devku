@@ -32,6 +32,20 @@ Caddy ──┬── php_fastcgi ──► php-cgi (one pool per PHP version)
 - Apache has its own generated `httpd.conf` and its own Settings tab, separate from the Caddyfile. DevKu installs it itself from Apache Lounge with SHA-256 verification, and `httpd` starts only while at least one site uses it.
 - Processes are supervised from within the DevKu binary. If a `php-cgi` instance exits unexpectedly, it is restarted with exponential backoff.
 
+## Where Data Lives
+
+Three locations with separate jobs:
+
+```
+install dir   C:\devku             devku.exe and the uninstaller (read-only)
+data root     %APPDATA%\DevKu      engines, runtime, config.json, logs, databases
+workspace     %USERPROFILE%\DevKu\sites   project folders (content, not state)
+```
+
+- The data root can be moved from Settings > System. DevKu copies the tree to an empty folder, leaves a small `location.json` pointer in `%APPDATA%\DevKu`, and restarts. `DEVKU_HOME` overrides everything and locks the move from the UI.
+- The workspace is the starting folder for the Add Site wizard and the Open Workspace button. It is not a site registry: projects inside it still have to be registered, and they may live anywhere.
+- Engines stay out of the install directory on purpose, so downloading an engine never needs elevation and an update never touches your data.
+
 ## Running Core (Headless / CLI)
 
 The same `devku` binary also serves as a CLI: without arguments it launches the desktop UI, while subcommands run headlessly.
