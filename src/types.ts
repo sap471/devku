@@ -6,6 +6,10 @@ export interface SiteView {
   domain: string;
   php: string;
   framework: string;
+  /** Apache adalah backend internal di belakang Caddy, bukan server kedua. */
+  backend: "caddy" | "apache";
+  /** URL publik situs, selalu tanpa port. */
+  url: string;
   enabled: boolean;
   path: string;
   root: string;
@@ -65,6 +69,23 @@ export interface PhpCatalogEntry {
 export interface PhpCatalogView {
   entries: PhpCatalogEntry[];
   warning: string | null;
+}
+
+export interface PhpExtensionEntry {
+  name: string;
+  enabled: boolean;
+  /** Nilai benar berarti arahan di php.ini memakai `zend_extension=`. */
+  zend: boolean;
+  /** File dll ada di folder ext; salah tanpa dll tidak bisa dinyalakan. */
+  available: boolean;
+}
+
+export interface PhpExtensionsView {
+  version: string;
+  ini_path: string;
+  entries: PhpExtensionEntry[];
+  /** Pool versi ini hidup: perubahan berlaku setelah dinyalakan ulang. */
+  running: boolean;
 }
 
 export interface DownloadProgress {
@@ -138,6 +159,18 @@ export interface Detection {
   project_root: string;
 }
 
+export interface ApacheView {
+  /** Folder instalasi Apache yang dipakai, null kalau belum dipasang. */
+  root: string | null;
+  /** Versi folder terbaru, misalnya 2.4.69-261002. */
+  version: string | null;
+  installed: boolean;
+  port: number;
+  /** Status service httpd: stopped, starting, ready, backoff, failed. */
+  status: string;
+  detail: string | null;
+}
+
 export interface Snapshot {
   tld: string;
   running: boolean;
@@ -158,6 +191,7 @@ export interface Snapshot {
   sites: SiteView[];
   services: ServiceView[];
   database: DatabaseView;
+  apache: ApacheView;
   downloads: DownloadsView;
 }
 

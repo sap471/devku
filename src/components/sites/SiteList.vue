@@ -108,7 +108,7 @@ function openWizard() {
         <div class="site-main">
           <div class="site-name-row">
             <span class="site-name">{{ site.name }}</span>
-            <span v-if="site.port" class="site-port">:{{ site.port }}</span>
+            <span v-if="site.port" class="site-port" title="Port FastCGI PHP">:{{ site.port }}</span>
           </div>
 
           <div class="site-domain-row">

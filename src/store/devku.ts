@@ -8,6 +8,7 @@ import type {
   RuntimeInfo,
   PhpCatalogEntry,
   PhpCatalogView,
+  PhpExtensionsView,
   DownloadProgress,
   ImportResponse,
   ImportReport,
@@ -23,7 +24,7 @@ import type {
 
 export type MainTab = "sites" | "settings";
 export type SiteSubTab = "general" | "logs" | "commands";
-export type SettingsSubTab = "php" | "database" | "server" | "system";
+export type SettingsSubTab = "php" | "database" | "server" | "apache" | "system";
 
 export interface ActiveDialogState {
   spec: DialogSpec;
@@ -84,6 +85,11 @@ export const state = reactive({
   phpCatalogLoading: false,
   phpCatalogError: null as string | null,
   phpCatalogWarning: null as string | null,
+
+  phpExtensions: null as PhpExtensionsView | null,
+  phpExtensionsLoading: false,
+  phpExtensionsError: null as string | null,
+  phpExtensionsVersion: "",
 
   download: null as DownloadProgress | null,
 
@@ -151,6 +157,12 @@ function applySnapshot(next: Snapshot): void {
   // Keep selected site valid
   if (state.selectedSiteId && !next.sites.some((s) => s.id === state.selectedSiteId)) {
     state.selectedSiteId = null;
+  }
+
+  // Ekstensi ikut versi PHP. Versi yang dihapus tidak boleh masih terpilih.
+  if (state.phpExtensionsVersion && !next.installed_php.includes(state.phpExtensionsVersion)) {
+    state.phpExtensionsVersion = "";
+    state.phpExtensions = null;
   }
 }
 
@@ -307,6 +319,43 @@ export async function setSitePhp(siteId: string, version: string): Promise<void>
     state.infoNotice = `Versi PHP untuk situs berhasil diubah ke ${version}.`;
   } catch (err) {
     state.notice = `Gagal mengganti versi PHP: ${String(err)}`;
+  } finally {
+    state.busy = null;
+  }
+}
+
+export async function setSiteBackend(
+  siteId: string,
+  backend: "caddy" | "apache",
+): Promise<void> {
+  state.busy = "set-backend";
+  state.notice = null;
+  try {
+    const next = await invoke<Snapshot>("set_site_backend", {
+      id: siteId,
+      backend,
+    });
+    applySnapshot(next);
+    state.infoNotice =
+      backend === "apache"
+        ? "Situs dilayani Apache di belakang Caddy. Akses tetap lewat domain dan HTTPS."
+        : "Situs kembali dilayani langsung oleh Caddy.";
+  } catch (err) {
+    state.notice = `Gagal mengganti web server: ${String(err)}`;
+  } finally {
+    state.busy = null;
+  }
+}
+
+export async function setApachePort(port: number): Promise<void> {
+  state.busy = "apache-port";
+  state.notice = null;
+  try {
+    const next = await invoke<Snapshot>("set_apache_port", { port });
+    applySnapshot(next);
+    state.infoNotice = `Port internal Apache diubah ke ${port}.`;
+  } catch (err) {
+    state.notice = `Gagal mengubah port Apache: ${String(err)}`;
   } finally {
     state.busy = null;
   }
@@ -478,6 +527,63 @@ export async function restartPhp(version: string): Promise<void> {
     state.notice = `Gagal memulai ulang PHP ${version}: ${String(err)}`;
   } finally {
     state.busy = null;
+  }
+}
+
+export function defaultExtensionVersion(): string {
+  const installed = state.snapshot?.installed_php ?? [];
+  const preferred = state.snapshot?.default_php ?? "";
+  return preferred && installed.includes(preferred)
+    ? preferred
+    : installed[installed.length - 1] || "";
+}
+
+export async function loadPhpExtensions(version: string): Promise<void> {
+  if (!version) return;
+  state.phpExtensionsVersion = version;
+  state.phpExtensionsError = null;
+  state.phpExtensionsLoading = true;
+  try {
+    state.phpExtensions = await invoke<PhpExtensionsView>("php_extensions", {
+      version,
+    });
+  } catch (err) {
+    state.phpExtensions = null;
+    state.phpExtensionsError = String(err);
+  } finally {
+    state.phpExtensionsLoading = false;
+  }
+}
+
+export async function togglePhpExtension(name: string, enable: boolean): Promise<void> {
+  const version = state.phpExtensionsVersion;
+  if (!version || state.busy) return;
+  state.busy = "php-ext";
+  state.notice = null;
+  try {
+    const view = await invoke<PhpExtensionsView>("set_php_extension", {
+      version,
+      name,
+      enable,
+    });
+    state.phpExtensions = view;
+    const kata = enable ? "dinyalakan" : "dimatikan";
+    state.infoNotice = view.running
+      ? `${name} ${kata}. Restart pool PHP ${version} agar perubahan berlaku.`
+      : `${name} ${kata} di php.ini ${version}.`;
+  } catch (err) {
+    state.notice = `Gagal mengubah ekstensi ${name}: ${String(err)}`;
+  } finally {
+    state.busy = null;
+  }
+}
+
+export async function restartPhpForExtensions(): Promise<void> {
+  const version = state.phpExtensionsVersion;
+  if (!version) return;
+  await restartPhp(version);
+  if (!state.busy && !state.notice) {
+    void loadPhpExtensions(version);
   }
 }
 
@@ -714,7 +820,9 @@ export async function openDataFolder(): Promise<void> {
   }
 }
 
-export async function installBinary(target: "caddy" | "bun" | "composer"): Promise<void> {
+export async function installBinary(
+  target: "caddy" | "apache" | "bun" | "composer",
+): Promise<void> {
   state.notice = null;
   state.download = { target, version: "", received: 0, total: null, stage: "daftar" };
 
@@ -752,7 +860,7 @@ export async function setStartAtLogin(enable: boolean): Promise<void> {
   state.busy = "start-login";
   state.configNotice = null;
   try {
-    const next = await invoke<Snapshot>("set_start_at_login", { enable });
+    const next = await invoke<Snapshot>("set_start_at_login", { enabled: enable });
     applySnapshot(next);
     state.infoNotice = enable
       ? "DevKu akan dijalankan saat Windows login."

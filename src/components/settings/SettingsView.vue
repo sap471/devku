@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   state,
   setDefaultPhp,
   setPhpPath,
   openPhpIni,
   restartPhp,
+  loadPhpExtensions,
+  togglePhpExtension,
+  restartPhpForExtensions,
   askRemovePhp,
   loadPhpCatalog,
   installPhp,
@@ -17,6 +20,7 @@ import {
   openBackups,
   openDataFolder,
   trustCaddy,
+  setApachePort,
   setComposerGlobalPath,
   installBinary,
   setStartAtLogin,
@@ -31,6 +35,10 @@ onMounted(() => {
   if (!state.phpCatalog) {
     void loadPhpCatalog();
   }
+  if (state.settingsTab === "php" && !state.phpExtensions) {
+    const target = defaultExtensionTarget();
+    if (target) void loadPhpExtensions(target);
+  }
 });
 
 const installedPhp = computed(() => state.snapshot?.installed_php ?? []);
@@ -38,6 +46,55 @@ const defaultPhp = computed(() => state.snapshot?.default_php ?? "");
 const phpPath = computed(() => state.snapshot?.php_path);
 const database = computed(() => state.snapshot?.database);
 const composerGlobal = computed(() => state.snapshot?.composer_global);
+const apache = computed(() => state.snapshot?.apache);
+const installingApache = computed(() => state.download?.target === "apache");
+const apachePort = ref(8080);
+
+watch(
+  () => apache.value?.port,
+  (port) => {
+    if (port) apachePort.value = port;
+  },
+  { immediate: true },
+);
+
+async function saveApachePort() {
+  const port = Number(apachePort.value);
+  if (!Number.isInteger(port) || port < 1024) {
+    state.notice = "Port Apache harus 1024 atau lebih.";
+    return;
+  }
+  await setApachePort(port);
+}
+
+/// Versi pilihan tab Ekstensi: yang dipilih user, atau default global,
+/// atau terbesar yang terpasang (daftar installed_php menaik).
+const extensionTarget = computed(() => defaultExtensionTarget());
+const extVersion = computed(() => state.phpExtensionsVersion || extensionTarget.value);
+
+function defaultExtensionTarget(): string {
+  const installed = state.snapshot?.installed_php ?? [];
+  const preferred = state.snapshot?.default_php ?? "";
+  if (preferred && installed.includes(preferred)) return preferred;
+  return installed[installed.length - 1] ?? "";
+}
+
+function chooseExtensionVersion(version: string): void {
+  void loadPhpExtensions(version);
+}
+
+// Ekstensi dibaca dari disk lokal, jadi silakan dimuat tiap kali tab PHP
+// dibuka tanpa daftar cache. Yang sudah dihapus tidak boleh masih terpilih.
+watch(
+  () => [state.settingsTab, installedPhp.value.join(","), defaultPhp.value] as const,
+  ([tab]) => {
+    if (tab !== "php" || state.busy) return;
+    if (!state.phpExtensions && !state.phpExtensionsLoading) {
+      const target = defaultExtensionTarget();
+      if (target) void loadPhpExtensions(target);
+    }
+  },
+);
 
 function setTab(tab: SettingsSubTab) {
   state.settingsTab = tab;
@@ -93,6 +150,18 @@ function setTab(tab: SettingsSubTab) {
             <path d="M0 2.5A1.5 1.5 0 0 1 1.5 1h13A1.5 1.5 0 0 1 16 2.5v3A1.5 1.5 0 0 1 14.5 7h-13A1.5 1.5 0 0 1 0 5.5v-3Zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-13ZM0 10.5A1.5 1.5 0 0 1 1.5 9h13a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 13.5v-3Zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-13Z"/>
           </svg>
           <span>Web Server (Caddy)</span>
+        </button>
+
+        <button
+          class="nav-item"
+          :class="{ active: state.settingsTab === 'apache' }"
+          type="button"
+          @click="setTab('apache')"
+        >
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm5.9 7h-2.4a12.6 12.6 0 0 0-1-4.2A6.5 6.5 0 0 1 13.9 7ZM8 1.5c.7.9 1.3 2.6 1.4 5.5H6.6c.1-2.9.7-4.6 1.4-5.5ZM2.1 7a6.5 6.5 0 0 1 3.4-4.2 12.6 12.6 0 0 0-1 4.2H2.1Zm0 2h2.4c.1 1.6.4 3 1 4.2A6.5 6.5 0 0 1 2.1 9Zm4.5 0h2.8c-.1 2.9-.7 4.6-1.4 5.5-.7-.9-1.3-2.6-1.4-5.5Zm4.8 0h2.4a6.5 6.5 0 0 1-3.4 4.2c.6-1.2 1-2.6 1-4.2Z"/>
+          </svg>
+          <span>Apache</span>
         </button>
 
         <button
@@ -219,6 +288,78 @@ function setTab(tab: SettingsSubTab) {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- PHP Extensions Card -->
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title">Ekstensi PHP</h3>
+              <p class="card-subtitle">Hidup/matikan ekstensi di php.ini versi terpilih.</p>
+            </div>
+            <select
+              v-if="installedPhp.length"
+              class="select-input"
+              :value="extVersion"
+              aria-label="Versi PHP untuk daftar ekstensi"
+              @change="chooseExtensionVersion(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="ver in installedPhp" :key="ver" :value="ver">PHP {{ ver }}</option>
+            </select>
+          </div>
+          <div class="card-body">
+            <div v-if="!installedPhp.length" class="empty-box-inline">
+              <p>Belum ada PHP terpasang, jadi tidak ada ekstensi untuk dikelola. Pasang versi di katalog di bawah.</p>
+            </div>
+            <div v-else-if="state.phpExtensionsLoading" class="empty-box-inline">
+              <span class="spinner"></span>
+              <p>Membaca daftar ekstensi PHP {{ extVersion }}...</p>
+            </div>
+            <div v-else-if="state.phpExtensionsError" class="empty-box-inline">
+              <p class="text-bad">{{ state.phpExtensionsError }}</p>
+              <button class="btn btn-sm btn-quiet" type="button" @click="loadPhpExtensions(extVersion)">
+                Coba lagi
+              </button>
+            </div>
+            <div v-else-if="!state.phpExtensions?.entries.length" class="empty-box-inline">
+              <p>Folder ext PHP {{ extVersion }} tidak berisi dll ekstensi.</p>
+            </div>
+            <template v-else>
+              <div class="ext-list">
+                <div v-for="entry in state.phpExtensions.entries" :key="entry.name" class="ext-row">
+                  <div class="ext-info">
+                    <code class="ext-name">{{ entry.name }}</code>
+                    <span class="ext-meta">
+                      <span v-if="entry.zend" class="ext-kind">zend</span>
+                      <span v-if="!entry.available" class="ext-missing">dll tidak ada</span>
+                    </span>
+                  </div>
+                  <button
+                    class="btn-toggle"
+                    :class="{ active: entry.enabled }"
+                    type="button"
+                    :aria-pressed="entry.enabled"
+                    :disabled="state.busy === 'php-ext' || (!entry.available && !entry.enabled)"
+                    :aria-label="entry.name"
+                    @click="togglePhpExtension(entry.name, !entry.enabled)"
+                  >
+                    <span class="toggle-slider"></span>
+                  </button>
+                </div>
+              </div>
+              <div v-if="state.phpExtensions.running" class="ext-restart">
+                <span>Pool PHP {{ state.phpExtensions.version }} sedang hidup. Nyalakan ulang pool agar perubahan ekstensi berlaku.</span>
+                <button
+                  class="btn btn-sm btn-quiet"
+                  type="button"
+                  :disabled="state.busy === 'restart-php' || state.busy === 'php-ext'"
+                  @click="restartPhpForExtensions"
+                >
+                  Restart Pool
+                </button>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -438,7 +579,7 @@ function setTab(tab: SettingsSubTab) {
             <div class="setting-row">
               <div class="setting-info">
                 <span class="setting-name">Domain TLD Lokal</span>
-                <span class="setting-desc">Semua situs lokal akan beralamat di <code>*.{{ state.snapshot?.tld ?? 'test' }}</code></span>
+                <span class="setting-desc">Semua situs beralamat di <code>*.{{ state.snapshot?.tld ?? 'test' }}</code>, termasuk situs yang memakai backend Apache.</span>
               </div>
               <div class="setting-ctrl">
                 <span class="badge-tld">.{{ state.snapshot?.tld ?? 'test' }}</span>
@@ -481,9 +622,123 @@ function setTab(tab: SettingsSubTab) {
             </div>
           </div>
         </div>
+
       </section>
 
-      <!-- 4. TAB: SISTEM & INTEGRASI -->
+      <!-- 4. TAB: APACHE -->
+      <section v-else-if="state.settingsTab === 'apache'" class="tab-pane">
+        <header class="pane-header">
+          <div>
+            <h2 class="pane-title">Apache</h2>
+            <p class="pane-desc">
+              Apache berjalan sebagai backend internal di belakang Caddy. Akses situs tetap lewat
+              domain di port 80/443, termasuk HTTPS; port Apache tidak pernah dibuka ke luar.
+            </p>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title">Instalasi</h3>
+              <p class="card-subtitle">
+                Diambil dari Apache Lounge (build Win64), diverifikasi SHA-256, lalu dipasang di
+                <code>engines/apache</code>. Tidak ada folder yang perlu dipilih.
+              </p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div v-if="!apache" class="setting-row">
+              <div class="setting-info">
+                <span class="setting-desc">Membaca status Apache...</span>
+              </div>
+            </div>
+
+            <template v-else>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-name">Status</span>
+                  <span v-if="apache.installed" class="setting-desc">
+                    Apache {{ apache.version ?? 'terpasang' }} siap dipakai.
+                  </span>
+                  <span v-else class="setting-desc">
+                    Belum terpasang. Unduhan sekitar 14 MB dan butuh koneksi internet.
+                  </span>
+                  <span class="status-pill" :class="apache.installed ? 'pill-ok' : 'pill-warn'">
+                    {{ apache.installed ? 'Siap' : 'Belum terpasang' }}
+                  </span>
+                  <span v-if="apache.installed" class="setting-desc font-mono">
+                    {{ apache.root }}
+                  </span>
+                  <span v-if="apache.status === 'failed'" class="setting-desc text-bad">
+                    Apache gagal berjalan{{ apache.detail ? `: ${apache.detail}` : '.' }}
+                  </span>
+                </div>
+                <div class="setting-ctrl">
+                  <button
+                    class="btn btn-sm btn-outline"
+                    type="button"
+                    :disabled="!!state.download"
+                    @click="installBinary('apache')"
+                  >
+                    {{
+                      installingApache
+                        ? 'Memasang...'
+                        : apache.installed
+                          ? 'Pasang Ulang'
+                          : 'Pasang Apache'
+                    }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-name">Port Internal Apache</span>
+                  <span class="setting-desc">
+                    httpd hanya mendengarkan <code>127.0.0.1:{{ apache.port }}</code>. Caddy
+                    meneruskan situs Apache ke sini, jadi URL situs tetap
+                    <code>http://domain</code> tanpa port. 80, 443, dan 2019 dipakai Caddy.
+                  </span>
+                </div>
+                <div class="setting-ctrl flex-gap">
+                  <input
+                    v-model.number="apachePort"
+                    class="input input-port"
+                    type="number"
+                    min="1024"
+                    max="65535"
+                    aria-label="Port Apache"
+                    :disabled="state.busy === 'apache-port'"
+                  />
+                  <button
+                    class="btn btn-sm btn-outline"
+                    type="button"
+                    :disabled="state.busy === 'apache-port' || apachePort === apache.port"
+                    @click="saveApachePort"
+                  >
+                    Simpan
+                  </button>
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-name">Cakupan</span>
+                  <span class="setting-desc">
+                    httpd hanya menyala selama ada situs yang memakai Apache, dan mati lagi saat
+                    situs terakhir pindah ke Caddy. Semua akses tetap lewat Caddy di 80/443. Build
+                    Apache Lounge membutuhkan Visual C++ Redistributable 2015-2022; biasanya sudah
+                    ada jika Laragon atau XAMPP pernah dipakai.
+                  </span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. TAB: SISTEM & INTEGRASI -->
       <section v-else-if="state.settingsTab === 'system'" class="tab-pane">
         <header class="pane-header">
           <div>
@@ -832,6 +1087,11 @@ function setTab(tab: SettingsSubTab) {
   gap: 8px;
 }
 
+.input-port {
+  width: 96px;
+  text-align: right;
+}
+
 .select-input {
   height: 30px;
   padding: 0 10px;
@@ -1119,5 +1379,60 @@ function setTab(tab: SettingsSubTab) {
 
 .btn-toggle.active .toggle-slider {
   transform: translateX(12px);
+}
+
+/* Daftar ekstensi: satu baris per dll, scroll kalau memanjang. */
+.ext-list {
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.ext-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+}
+
+.ext-row + .ext-row {
+  border-top: 1px solid var(--line);
+}
+
+.ext-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ext-name {
+  font-size: 0.8125rem;
+}
+
+.ext-meta {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.ext-kind {
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.ext-missing {
+  color: var(--bad);
+  font-size: 0.6875rem;
+}
+
+.ext-restart {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--muted);
 }
 </style>

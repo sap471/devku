@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from "vue";
+import { computed, ref, watch, nextTick, onUnmounted } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -8,6 +8,7 @@ import {
   STATUS_WORD,
   frameworkLabel,
   setSitePhp,
+  setSiteBackend,
   askRemoveSite,
   toggleOpenMenu,
   runOpenIn,
@@ -28,6 +29,8 @@ import {
 
 const site = computed(() => currentSite.value);
 const installedPhp = computed(() => state.snapshot?.installed_php ?? []);
+const apacheReady = computed(() => state.snapshot?.apache.installed ?? false);
+const apachePort = computed(() => state.snapshot?.apache.port ?? 8080);
 
 // Log viewer reactive states
 type LogFilterMode = "all" | "errors" | "http" | "raw";
@@ -138,13 +141,27 @@ function setSubTab(tab: SiteSubTab) {
 
 function openInBrowser() {
   if (!site.value) return;
-  void openUrl(`http://${site.value.domain}/`);
+  void openUrl(site.value.url);
 }
 
 async function onPhpChange(event: Event) {
   const select = event.target as HTMLSelectElement;
   if (!site.value || !select.value) return;
   await setSitePhp(site.value.id, select.value);
+}
+
+async function onBackendChange(event: Event) {
+  const select = event.target as HTMLSelectElement;
+  if (!site.value || !select.value) return;
+  const backend = select.value === "apache" ? "apache" : "caddy";
+  if (backend === site.value.backend) return;
+
+  await setSiteBackend(site.value.id, backend);
+  // Penolakan backend (misalnya Apache belum dipasang) tidak mengubah
+  // snapshot, jadi select dikembalikan ke nilai yang benar-benar tersimpan.
+  if (site.value.backend !== backend) {
+    select.value = site.value.backend;
+  }
 }
 
 async function runCommand(command: string) {
@@ -171,6 +188,51 @@ function refreshCurrentLog() {
     void loadLog(site.value.id);
   }
 }
+
+// Live: polling tail_log tiap 2 detik selama toggle hidup dan sub-tab Log
+// terbuka. Pindah situs ikut saja karena polling membaca situs aktif terkini.
+const liveLog = ref(false);
+let liveTimer: number | null = null;
+let liveBusy = false;
+
+async function liveTick(): Promise<void> {
+  if (liveBusy || !site.value) return;
+  liveBusy = true;
+  try {
+    await loadLog(site.value.id);
+  } finally {
+    liveBusy = false;
+  }
+}
+
+function startLive(): void {
+  if (liveTimer !== null) return;
+  void liveTick();
+  liveTimer = window.setInterval(() => void liveTick(), 2000);
+}
+
+function stopLive(): void {
+  if (liveTimer === null) return;
+  window.clearInterval(liveTimer);
+  liveTimer = null;
+}
+
+function toggleLive(): void {
+  liveLog.value = !liveLog.value;
+  if (liveLog.value) startLive();
+  else stopLive();
+}
+
+watch(
+  () => [state.siteSubTab, liveLog.value] as const,
+  ([tab]) => {
+    if (liveLog.value && tab === "logs" && site.value) startLive();
+    else stopLive();
+  },
+  { immediate: true },
+);
+
+onUnmounted(stopLive);
 
 async function copyVisibleLogs() {
   const text = filteredLogs.value.map((l) => l.raw).join("\n");
@@ -346,6 +408,38 @@ async function copyVisibleLogs() {
               </p>
             </div>
           </div>
+
+          <div class="field-row">
+            <label for="select-site-backend" class="field-label">Web Server</label>
+            <div class="field-control">
+              <select
+                id="select-site-backend"
+                class="input select-php"
+                :value="site.backend"
+                :disabled="state.busy === 'set-backend'"
+                @change="onBackendChange"
+              >
+                <option value="caddy">Caddy</option>
+                <option value="apache" :disabled="!apacheReady">
+                  Apache{{ apacheReady ? ' (via Caddy, HTTPS)' : ' (belum dipasang)' }}
+                </option>
+              </select>
+              <p class="field-hint">
+                <template v-if="site.backend === 'apache'">
+                  Apache melayani situs ini dari balik Caddy. Akses tetap di
+                  <code>https://{{ site.domain }}</code> tanpa port; httpd hanya hidup selama ada
+                  situs yang memakainya.
+                </template>
+                <template v-else-if="apacheReady">
+                  Caddy melayani situs ini langsung di 80/443. Apache hanya dipakai situs yang
+                  memilihnya, lewat port internal {{ apachePort }}.
+                </template>
+                <template v-else>
+                  Apache belum dipasang. Pasang di Pengaturan, Apache, lalu pilih di sini.
+                </template>
+              </p>
+            </div>
+          </div>
         </div>
 
         <div class="card-section">
@@ -355,6 +449,12 @@ async function copyVisibleLogs() {
             <div class="info-item">
               <span class="info-label">Framework</span>
               <span class="info-value">{{ frameworkLabel(site.framework) }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Web Server</span>
+              <span class="info-value">
+                {{ site.backend === 'apache' ? 'Apache di belakang Caddy' : 'Caddy' }}
+              </span>
             </div>
             <div class="info-item">
               <span class="info-label">Port FastCGI</span>
@@ -455,6 +555,21 @@ async function copyVisibleLogs() {
                 <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25v-7.5Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25h-7.5Z"/>
               </svg>
               {{ copySuccess ? 'Tersalin!' : 'Salin' }}
+            </button>
+
+            <!-- Live toggle: polling log otomatis, tanpa klik Segarkan -->
+            <button
+              class="btn-tool"
+              :class="{ 'tool-active': liveLog }"
+              type="button"
+              :aria-pressed="liveLog"
+              :title="liveLog ? 'Live aktif: log dimuat ulang setiap 2 detik' : 'Muat log otomatis setiap 2 detik'"
+              @click="toggleLive"
+            >
+              <svg class="tool-icon" viewBox="0 0 16 16" fill="currentColor">
+                <circle cx="8" cy="8" r="3"/>
+              </svg>
+              Live
             </button>
 
             <!-- Refresh button -->
