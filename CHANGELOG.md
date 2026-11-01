@@ -8,6 +8,10 @@ Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
 
 ### Ditambahkan
 
+- Arsip engine yang sudah diunduh disimpan, dan pemasangan ulang versi yang sama
+  tidak mengunduh lagi selama checksum-nya cocok. Untuk paket tanpa checksum
+  resmi, digest dicatat setelah unduhan pertama. Bagian Konfigurasi menampilkan
+  jumlah dan ukuran arsip, dengan tombol Bersihkan. (`0e3e090`)
 - Server **MariaDB 11.4.13** lokal lewat panel Database di dasbor: pasang, mulai,
   stop, dan ceklis autostart sendiri. Versi dipatok dan diverifikasi dengan
   `sha256sums.txt`. (`80a23e1`)
