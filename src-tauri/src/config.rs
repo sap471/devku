@@ -86,6 +86,8 @@ pub struct Config {
     #[serde(default)]
     pub database: DatabaseSettings,
     #[serde(default)]
+    pub apache: ApacheSettings,
+    #[serde(default)]
     pub sites: Vec<Site>,
 }
 
@@ -115,6 +117,26 @@ impl Default for DatabaseSettings {
     }
 }
 
+/// Apache dipasang DevKu di `engines/apache` dan hanya mendengarkan loopback.
+/// Caddy di 80/443 meneruskan situs Apache ke port internal ini.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ApacheSettings {
+    #[serde(default = "default_apache_port")]
+    pub port: u16,
+}
+
+fn default_apache_port() -> u16 {
+    8080
+}
+
+impl Default for ApacheSettings {
+    fn default() -> Self {
+        Self {
+            port: default_apache_port(),
+        }
+    }
+}
+
 fn one() -> u32 {
     1
 }
@@ -137,6 +159,7 @@ impl Default for Config {
                 children: default_children(),
             },
             database: DatabaseSettings::default(),
+            apache: ApacheSettings::default(),
             sites: Vec::new(),
         }
     }
@@ -161,11 +184,28 @@ impl Config {
         write_atomic(&paths.config_file(), &json)
     }
 
-    /// Site yang benar-benar dilayani: enabled + backend cocok dengan backend aktif.
+    /// Backend efektif satu site: pilihan site, atau default global untuk
+    /// site lama yang belum pernah memilih.
+    pub fn backend_of(&self, site: &Site) -> Backend {
+        site.backend.unwrap_or(self.backend)
+    }
+
+    /// Semua site aktif, untuk hosts file dan alokasi pool PHP. Server yang
+    /// melayani tiap site ditentukan `backend_of`.
     pub fn served_sites(&self) -> impl Iterator<Item = &Site> {
-        self.sites
-            .iter()
-            .filter(move |s| s.enabled && s.backend.unwrap_or(self.backend) == self.backend)
+        self.sites.iter().filter(|site| site.enabled)
+    }
+
+    /// Site yang diteruskan Caddy ke httpd internal.
+    pub fn apache_sites(&self) -> impl Iterator<Item = &Site> {
+        self.served_sites()
+            .filter(|site| self.backend_of(site) == Backend::Apache)
+    }
+
+    /// Semua situs diakses lewat domain tanpa port: Caddy di 80/443 menjadi
+    /// pintu masuk, termasuk untuk situs yang backend-nya Apache.
+    pub fn site_url(&self, site: &Site) -> String {
+        format!("http://{}/", site.domain)
     }
 
     pub fn domain_for(&self, id: &str) -> String {

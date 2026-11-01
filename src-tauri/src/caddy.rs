@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 
 use crate::api;
-use crate::config::Config;
+use crate::config::{Backend, Config};
 use crate::paths::{Paths, write_atomic};
 use crate::proc::ServiceSpec;
 
@@ -144,26 +144,50 @@ impl WebServerBackend for CaddyBackend {
                 bail!("site {}: folder {} tidak ada", site.id, site.path.display());
             }
 
-            let root = quote(&site.path);
             let log = quote(&self.paths.logs().join(format!("{}.log", site.id)));
 
-            out.push_str(&format!(
-                "\nhttp://{domain}, https://{domain} {{\n\
-                 \ttls internal\n\
-                 \troot * {root}\n\
-                 \tencode gzip\n\
-                 \tphp_fastcgi 127.0.0.1:{port}\n\
-                 \tfile_server\n\
-                 \tlog {{\n\
-                 \t\toutput file {log}\n\
-                 \t\tformat console\n\
-                 \t}}\n\
-                 }}\n",
-                domain = site.domain,
-                root = root,
-                port = port,
-                log = log,
-            ));
+            match config.backend_of(site) {
+                // Satu-satunya pintu masuk tetap Caddy di 80/443. httpd hidup
+                // di loopback dan tidak pernah dibuka langsung ke luar.
+                Backend::Apache => {
+                    let apache = config.apache.port;
+                    out.push_str(&format!(
+                        "\nhttp://{domain}, https://{domain} {{\n\
+                         \ttls internal\n\
+                         \tencode gzip\n\
+                         \treverse_proxy 127.0.0.1:{apache} {{\n\
+                         \t\theader_up Host {{host}}\n\
+                         \t}}\n\
+                         \tlog {{\n\
+                         \t\toutput file {log}\n\
+                         \t\tformat console\n\
+                         \t}}\n\
+                         }}\n",
+                        domain = site.domain,
+                        log = log,
+                    ));
+                }
+                Backend::Caddy => {
+                    let root = quote(&site.path);
+                    out.push_str(&format!(
+                        "\nhttp://{domain}, https://{domain} {{\n\
+                         \ttls internal\n\
+                         \troot * {root}\n\
+                         \tencode gzip\n\
+                         \tphp_fastcgi 127.0.0.1:{port}\n\
+                         \tfile_server\n\
+                         \tlog {{\n\
+                         \t\toutput file {log}\n\
+                         \t\tformat console\n\
+                         \t}}\n\
+                         }}\n",
+                        domain = site.domain,
+                        root = root,
+                        port = port,
+                        log = log,
+                    ));
+                }
+            }
         }
 
         // Dasbor selalu ada, jadi port 80 tidak pernah kosong dan salah ketik
@@ -336,11 +360,17 @@ fn render_dashboard(config: &Config) -> String {
     let mut items = String::new();
     for site in config.served_sites() {
         items.push_str(&format!(
-            r#"<li><a href="http://{domain}/">{name}</a><span>{domain} · php {php} · {fw}</span></li>"#,
+            r#"<li><a href="{url}">{name}</a><span>{domain} · php {php} · {fw} · {server}</span></li>"#,
+            url = html_escape(&config.site_url(site)),
             domain = html_escape(&site.domain),
             name = html_escape(&site.name),
             php = html_escape(&site.php),
             fw = html_escape(site.framework.as_deref().unwrap_or("php")),
+            server = if config.backend_of(site) == crate::config::Backend::Apache {
+                "apache"
+            } else {
+                "caddy"
+            },
         ));
     }
 
@@ -421,6 +451,7 @@ mod tests {
                 children: 4,
             },
             database: Default::default(),
+            apache: Default::default(),
             sites: vec![
                 Site {
                     id: "app-a".to_string(),
@@ -488,6 +519,45 @@ mod tests {
             "baru"
         );
         assert_eq!(classify_trust("tgasbg"), "selesai");
+    }
+
+    #[test]
+    fn apache_sites_are_reverse_proxied_not_passed_to_fastcgi() {
+        let paths = Paths {
+            root: std::env::temp_dir(),
+        };
+        let caddy = CaddyBackend::new(paths);
+        let mut config = sample_config();
+        config.apache.port = 8080;
+        config.sites[0].backend = Some(Backend::Apache);
+
+        let text = caddy.render(&config, &ports()).unwrap();
+        let app_a = text
+            .split("http://app-a.localhost")
+            .nth(1)
+            .unwrap()
+            .split("http://app-b.localhost")
+            .next()
+            .unwrap();
+
+        assert!(app_a.contains("reverse_proxy 127.0.0.1:8080"));
+        assert!(app_a.contains("header_up Host {host}"));
+        assert!(!app_a.contains("php_fastcgi"));
+        assert!(text.contains("php_fastcgi 127.0.0.1:9002"));
+    }
+
+    #[test]
+    fn dashboard_links_every_site_through_caddy() {
+        let mut config = sample_config();
+        config.apache.port = 8080;
+        config.sites[0].backend = Some(Backend::Apache);
+
+        let html = render_dashboard(&config);
+
+        assert!(html.contains("http://app-a.localhost/\">"));
+        assert!(html.contains("http://app-b.localhost/"));
+        assert!(!html.contains(":8080"));
+        assert!(html.contains("apache"));
     }
 
     #[test]

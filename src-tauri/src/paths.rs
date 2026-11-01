@@ -63,6 +63,15 @@ impl Paths {
         self.engines().join("caddy")
     }
 
+    pub fn apache_dir(&self) -> PathBuf {
+        self.engines().join("apache")
+    }
+
+    /// Satu versi Apache hasil pemasangan DevKu, misalnya `2.4.69-261002`.
+    pub fn apache_version_dir(&self, version: &str) -> PathBuf {
+        self.apache_dir().join(version)
+    }
+
     pub fn mariadb_dir(&self) -> PathBuf {
         self.engines().join("mariadb")
     }
@@ -111,6 +120,16 @@ impl Paths {
 
     pub fn caddyfile(&self) -> PathBuf {
         self.runtime().join("Caddyfile")
+    }
+
+    /// Konfigurasi Apache yang dihasilkan DevKu, terpisah dari folder
+    /// instalasi Apache supaya tidak menimpa conf milik user.
+    pub fn apache_runtime(&self) -> PathBuf {
+        self.runtime().join("apache")
+    }
+
+    pub fn apache_config(&self) -> PathBuf {
+        self.apache_runtime().join("httpd.conf")
     }
 
     pub fn dashboard_dir(&self) -> PathBuf {

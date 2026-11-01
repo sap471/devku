@@ -96,7 +96,6 @@ impl PhpManager {
         if ini.exists() {
             return Ok(ini);
         }
-
         let template = ["php.ini-development", "php.ini-production"]
             .iter()
             .map(|name| dir.join(name))
@@ -123,6 +122,60 @@ impl PhpManager {
 
         std::fs::write(&ini, lines.join("\n"))?;
         Ok(ini)
+    }
+
+    pub fn ext_dir(&self, version: &str) -> PathBuf {
+        self.paths.php_dir(version).join("ext")
+    }
+
+    /// Gabungan dll di `ext/` dan arahan di php.ini untuk satu versi.
+    pub fn extensions(&self, version: &str) -> Result<Vec<crate::extensions::ExtensionEntry>> {
+        let ini = self.ensure_ini(version)?;
+        let text = std::fs::read_to_string(&ini)?;
+        let mut dlls = BTreeSet::new();
+        if let Ok(entries) = std::fs::read_dir(self.ext_dir(version)) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let is_dll = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"));
+                if !is_dll {
+                    continue;
+                }
+                if let Some(name) = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .and_then(crate::extensions::normalize_name)
+                {
+                    dlls.insert(name);
+                }
+            }
+        }
+        Ok(crate::extensions::scan(&text, dlls))
+    }
+
+    /// Ubah satu ekstensi di php.ini. Mengembalikan true kalau berkas
+    /// benar-benar ditulis ulang.
+    pub fn set_extension(&self, version: &str, name: &str, enable: bool) -> Result<bool> {
+        if enable {
+            let exists = crate::extensions::normalize_name(name).is_some_and(|name| {
+                self.ext_dir(version)
+                    .join(format!("php_{name}.dll"))
+                    .exists()
+            });
+            if !exists {
+                bail!("dll ekstensi {name} tidak ada di folder ext PHP {version}");
+            }
+        }
+
+        let ini = self.ensure_ini(version)?;
+        let text = std::fs::read_to_string(&ini)?;
+        let Some(next) = crate::extensions::toggle(&text, name, enable)? else {
+            return Ok(false);
+        };
+        crate::paths::write_atomic(&ini, &next)?;
+        Ok(true)
     }
 
     pub fn spec(&self, version: &str, port: u16, children: u16) -> Result<ServiceSpec> {
@@ -203,6 +256,51 @@ mod tests {
         assert!(text.contains("extension=mbstring"));
         // Ekstensi di luar daftar default harus tetap terkomen.
         assert!(text.contains(";extension=snmp"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn extensions_view_and_toggle_edit_ini() {
+        let root = std::env::temp_dir().join(format!("devku-php-ext-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let php_dir = root.join("engines/php/8.4.5");
+        std::fs::create_dir_all(php_dir.join("ext")).unwrap();
+        std::fs::write(
+            php_dir.join("php.ini-development"),
+            ";extension=curl\n;zend_extension=opcache\n",
+        )
+        .unwrap();
+        std::fs::write(php_dir.join("ext/php_curl.dll"), b"dummy").unwrap();
+        std::fs::write(php_dir.join("ext/php_opcache.dll"), b"dummy").unwrap();
+
+        let manager = PhpManager::new(Paths { root: root.clone() });
+        let entries = manager.extensions("8.4.5").unwrap();
+        // curl ikut DEFAULT_EXTENSIONS, jadi ensure_ini sudah menyalakannya.
+        let curl = entries.iter().find(|entry| entry.name == "curl").unwrap();
+        assert!(curl.dll && curl.enabled);
+
+        let opcache = entries
+            .iter()
+            .find(|entry| entry.name == "opcache")
+            .unwrap();
+        assert!(opcache.dll && opcache.zend && !opcache.enabled);
+        assert_eq!(entries.len(), 2);
+
+        // Menyalakan tanpa dll harus ditolak: php-cgi akan gagal start.
+        let missing = manager.set_extension("8.4.5", "mbstring", true);
+        assert!(missing.is_err());
+
+        manager.set_extension("8.4.5", "opcache", true).unwrap();
+        let ini = std::fs::read_to_string(manager.ini_path("8.4.5")).unwrap();
+        assert!(ini.lines().any(|line| line == "zend_extension=opcache"));
+
+        manager.set_extension("8.4.5", "opcache", false).unwrap();
+        let ini = std::fs::read_to_string(manager.ini_path("8.4.5")).unwrap();
+        assert!(
+            ini.lines()
+                .all(|line| line.trim_start() != "zend_extension=opcache")
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

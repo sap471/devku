@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Config, Site};
+use crate::config::{Backend, Config, Site};
 use crate::database::{DatabaseBackend, Mariadb};
 use crate::detect;
 use crate::paths::Paths;
@@ -35,6 +35,11 @@ pub struct SiteView {
     pub domain: String,
     pub php: String,
     pub framework: String,
+    /// "caddy" atau "apache" untuk situs ini. Keduanya diakses lewat Caddy
+    /// di 80/443; Apache hanya backend internalnya.
+    pub backend: String,
+    /// URL publik situs, selalu tanpa port.
+    pub url: String,
     pub enabled: bool,
     pub path: String,
     /// Akar project, dipakai terminal. Untuk Laravel beda dengan `path`.
@@ -49,6 +54,26 @@ pub struct ServiceView {
     pub name: String,
     pub status: String,
     pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PhpExtensionView {
+    pub name: String,
+    pub enabled: bool,
+    /// Nilai benar berarti arahan di php.ini memakai `zend_extension=`.
+    pub zend: bool,
+    /// File php_*.dll ada di folder ext. Salah tanpa dll jangan bisa dinyalakan.
+    pub available: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PhpExtensionsView {
+    pub version: String,
+    pub ini_path: String,
+    pub entries: Vec<PhpExtensionView>,
+    /// Pool php-cgi untuk versi ini hidup: perubahan baru berlaku setelah
+    /// pool dinyalakan ulang.
+    pub running: bool,
 }
 
 /// Ringkasan satu penghapusan PHP, supaya UI bisa menyebut apa yang ikut
@@ -117,8 +142,25 @@ pub struct Snapshot {
     pub services: Vec<ServiceView>,
     /// Server database lokal, termasuk saat belum terpasang.
     pub database: DatabaseView,
+    /// Backend Apache opsional, selalu ada supaya UI bisa menampilkan
+    /// keadaannya walau belum diatur.
+    pub apache: ApacheView,
     /// Arsip engine yang tersimpan untuk pemasangan ulang.
     pub downloads: DownloadsView,
+}
+
+/// Keadaan Apache: versi yang terpasang, port, dan status httpd.
+#[derive(Clone, Debug, Serialize)]
+pub struct ApacheView {
+    /// Folder instalasi yang sedang dipakai, null kalau belum dipasang.
+    pub root: Option<String>,
+    /// Versi folder terbaru di `engines/apache`, misalnya `2.4.69-261002`.
+    pub version: Option<String>,
+    pub installed: bool,
+    pub port: u16,
+    /// Status service saat Apache ikut berjalan, "stopped" kalau tidak dipakai.
+    pub status: String,
+    pub detail: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -199,6 +241,11 @@ impl Session {
             });
         }
 
+        let apache_service = services
+            .iter()
+            .find(|item| item.name == "apache")
+            .map(|item| (item.status.clone(), item.detail.clone()));
+
         let sites = self
             .config
             .sites
@@ -208,11 +255,19 @@ impl Session {
                     .iter()
                     .find(|(version, _)| version == &site.php)
                     .map(|(_, state)| state.clone());
+                let backend = self.config.backend_of(site);
 
                 let (status, detail) = match (&self.runtime, state) {
                     (None, _) => ("stopped".to_string(), None),
                     (Some(_), Some(state)) if site.enabled => {
-                        (state.tag().to_string(), state.detail())
+                        // Site Apache mengikuti httpd: kalau httpd belum siap
+                        // atau gagal, status PHP yang "ready" menyesatkan.
+                        match (&apache_service, backend) {
+                            (Some((status, detail)), Backend::Apache) if status != "ready" => {
+                                (status.clone(), detail.clone())
+                            }
+                            _ => (state.tag().to_string(), state.detail()),
+                        }
                     }
                     (Some(_), _) => ("stopped".to_string(), None),
                 };
@@ -223,6 +278,11 @@ impl Session {
                     domain: site.domain.clone(),
                     php: site.php.clone(),
                     framework: site.framework.clone().unwrap_or_else(|| "php".to_string()),
+                    backend: match backend {
+                        Backend::Caddy => "caddy".to_string(),
+                        Backend::Apache => "apache".to_string(),
+                    },
+                    url: self.config.site_url(site),
                     enabled: site.enabled,
                     path: site.path.to_string_lossy().to_string(),
                     root: site
@@ -268,6 +328,23 @@ impl Session {
             has_password: !database_backend.password().is_empty(),
         };
 
+        let apache_backend = crate::apache::ApacheBackend::from_config(&self.paths, &self.config);
+        let apache = ApacheView {
+            root: apache_backend
+                .root()
+                .map(|path| path.to_string_lossy().to_string()),
+            version: apache_backend.version(),
+            installed: apache_backend.is_installed(),
+            port: self.config.apache.port,
+            status: apache_service
+                .as_ref()
+                .map(|(status, _)| status.clone())
+                .unwrap_or_else(|| "stopped".to_string()),
+            detail: apache_service
+                .as_ref()
+                .and_then(|(_, detail)| detail.clone()),
+        };
+
         Snapshot {
             tld: self.config.tld.clone(),
             running: self.runtime.is_some(),
@@ -290,6 +367,7 @@ impl Session {
             sites,
             services,
             database,
+            apache,
             downloads: {
                 let (files, bytes) = crate::download::cached_archives(&self.paths);
                 DownloadsView { files, bytes }
@@ -397,6 +475,48 @@ impl Session {
         self.refresh().await
     }
 
+    /// Ganti backend satu site. Apache harus sudah diatur lebih dulu supaya
+    /// site tidak diarahkan ke port yang tidak ada pendengarnya.
+    pub async fn set_site_backend(&mut self, id: &str, backend: Backend) -> Result<()> {
+        if backend == Backend::Apache {
+            let apache = crate::apache::ApacheBackend::from_config(&self.paths, &self.config);
+            if !apache.is_installed() {
+                bail!("Apache belum dipasang; pasang lewat Pengaturan > Apache");
+            }
+        }
+
+        let Some(site) = self.config.sites.iter_mut().find(|site| site.id == id) else {
+            bail!("site {id} tidak ditemukan");
+        };
+        site.backend = Some(backend);
+        self.config.save(&self.paths)?;
+        self.refresh().await
+    }
+
+    /// Port internal Apache, terpisah dari 80/443 dan 2019 milik Caddy. Caddy
+    /// meneruskan situs Apache ke port ini, jadi nilainya tidak pernah tampil
+    /// di URL. Nilai yang bertabrakan ditolak supaya tidak gagal start.
+    pub async fn set_apache_port(&mut self, port: u16) -> Result<()> {
+        if port < 1024 {
+            bail!("port Apache harus 1024 atau lebih");
+        }
+        if matches!(port, 80 | 443 | 2019) {
+            bail!("port {port} dipakai Caddy; pilih port lain untuk Apache");
+        }
+
+        self.config.apache.port = port;
+        self.config.save(&self.paths)?;
+        self.refresh().await
+    }
+
+    /// Berhenti tanpa mematikan service lain, dipakai sebelum memasang ulang
+    /// Apache karena berkas httpd.exe yang berjalan tidak bisa ditimpa.
+    pub async fn stop_apache(&mut self) {
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.stop_apache().await;
+        }
+    }
+
     /// Berkas php.ini satu versi. Dibuat kalau belum ada, karena folder hasil
     /// ekstraksi manual bisa datang tanpa berkas ini.
     pub fn php_ini_path(&self, version: &str) -> Result<PathBuf> {
@@ -422,6 +542,56 @@ impl Session {
             .restart_version(version, children, &self.paths, self.hook.clone())
             .await?;
         Ok(())
+    }
+
+    /// Daftar ekstensi satu versi: dua sumber (dll dan php.ini) digabung.
+    pub async fn php_extensions(&self, version: &str) -> Result<PhpExtensionsView> {
+        let manager = crate::php::PhpManager::new(self.paths.clone());
+        if !manager.installed().iter().any(|item| item == version) {
+            bail!("PHP {version} belum terpasang");
+        }
+        manager.ensure_ini(version)?;
+        let ini = manager.ini_path(version);
+
+        Ok(PhpExtensionsView {
+            version: version.to_string(),
+            ini_path: ini.display().to_string(),
+            entries: manager
+                .extensions(version)?
+                .into_iter()
+                .map(|entry| PhpExtensionView {
+                    name: entry.name,
+                    enabled: entry.enabled,
+                    zend: entry.zend,
+                    available: entry.dll,
+                })
+                .collect(),
+            running: self.php_running(version).await,
+        })
+    }
+
+    /// Hidup/matikan satu ekstensi lalu kembalikan daftar terbaru. Pool tidak
+    /// di-restart otomatis: UI yang menyatakan perlu restart dari view.
+    pub async fn set_php_extension(
+        &mut self,
+        version: &str,
+        name: &str,
+        enable: bool,
+    ) -> Result<PhpExtensionsView> {
+        let manager = crate::php::PhpManager::new(self.paths.clone());
+        if !manager.installed().iter().any(|item| item == version) {
+            bail!("PHP {version} belum terpasang");
+        }
+        manager.set_extension(version, name, enable)?;
+        self.php_extensions(version).await
+    }
+
+    async fn php_running(&self, version: &str) -> bool {
+        let name = format!("php-{version}");
+        self.snapshot().await.services.iter().any(|service| {
+            service.name == name
+                && matches!(service.status.as_str(), "starting" | "ready" | "backoff")
+        })
     }
 
     /// Hapus satu versi PHP. Situs yang memakainya dinonaktifkan, bukan
@@ -821,9 +991,9 @@ impl Session {
     }
 
     /// Setelah config berubah: nyalakan versi PHP yang baru dipakai, matikan
-    /// yang tidak lagi dipakai, lalu reload Caddy. Kalau runtime mati, cukup
-    /// simpan config.
-    async fn refresh(&mut self) -> Result<()> {
+    /// yang tidak lagi dipakai, lalu reload Caddy dan Apache. Kalau runtime
+    /// mati, cukup simpan config.
+    pub(crate) async fn refresh(&mut self) -> Result<()> {
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(());
         };
@@ -839,6 +1009,13 @@ impl Session {
 
         let in_use: BTreeSet<String> = versions.into_iter().collect();
         runtime.stop_unused(&in_use).await?;
+        match runtime
+            .apply_apache(&self.config, &self.paths, self.hook.clone())
+            .await
+        {
+            Ok(()) => runtime.clear_apache_error(),
+            Err(err) => runtime.set_apache_error(format!("{err:#}")),
+        }
         runtime.reload(&self.config, self.paths.clone()).await?;
         Ok(())
     }

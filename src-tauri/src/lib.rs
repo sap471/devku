@@ -1,3 +1,4 @@
+pub mod apache;
 pub mod api;
 pub mod archive;
 pub mod autostart;
@@ -10,6 +11,7 @@ pub mod console;
 pub mod database;
 pub mod detect;
 pub mod download;
+pub mod extensions;
 pub mod hosts;
 pub mod launcher;
 pub mod path_env;
@@ -91,11 +93,15 @@ pub fn run() {
             commands::install_php,
             commands::cancel_download,
             commands::set_site_php,
+            commands::set_site_backend,
+            commands::set_apache_port,
             commands::set_default_php,
             commands::enable_php_path,
             commands::disable_php_path,
             commands::open_php_ini,
             commands::restart_php,
+            commands::php_extensions,
+            commands::set_php_extension,
             commands::remove_php,
             commands::remove_all_php,
             commands::install_database,
@@ -107,6 +113,7 @@ pub fn run() {
             commands::open_backups,
             commands::clear_downloads,
             commands::install_caddy,
+            commands::install_apache,
             commands::install_bun,
             commands::install_composer,
             commands::finish_onboarding,

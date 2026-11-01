@@ -9,7 +9,7 @@ use crate::detect;
 use crate::download::{self, PhpRelease};
 use crate::paths::Paths;
 use crate::php::PhpManager;
-use crate::session::{ImportReport, Session, SiteDraft, Snapshot};
+use crate::session::{ImportReport, PhpExtensionsView, Session, SiteDraft, Snapshot};
 
 pub struct AppState {
     /// None berarti config gagal dibaca. UI harus menampilkan galat, bukan
@@ -482,6 +482,83 @@ async fn install_caddy_inner(
     Ok(())
 }
 
+/// Memasang Apache dari build Apache Lounge. DevKu memilih versi Win64
+/// terbaru di halaman resminya, memverifikasi SHA-256, lalu menyimpannya di
+/// `engines/apache/<versi>`.
+#[tauri::command]
+pub async fn install_apache(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    slot: State<'_, download::Slot>,
+) -> Result<Snapshot, String> {
+    let paths = session_paths(&state).await?;
+    let cancel = slot.begin().map_err(error)?;
+
+    // httpd yang sedang jalan mengunci httpd.exe; hentikan dulu supaya
+    // pemasangan ulang versi yang sama tidak gagal di tengah ekstraksi.
+    {
+        let mut guard = state.session.lock().await;
+        if let Some(session) = guard.as_mut() {
+            session.stop_apache().await;
+        }
+    }
+
+    let result = install_apache_inner(&app, &paths, &cancel).await;
+    slot.finish();
+
+    // Apa pun hasilnya, hidupkan lagi httpd yang tadi dihentikan supaya
+    // kegagalan unduhan tidak ikut mematikan situs Apache.
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    let _ = session.refresh().await;
+
+    result.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+async fn install_apache_inner(
+    app: &AppHandle,
+    paths: &Paths,
+    cancel: &AtomicBool,
+) -> anyhow::Result<()> {
+    let client = download::client()?;
+    report(app, "apache", "", 0, None, "daftar");
+
+    let asset = download::apache_latest(&client).await?;
+    let checksum = download::apache_checksum(&client, &asset).await?;
+    let version = asset.version.clone();
+
+    let archive = paths.downloads().join(&asset.filename);
+    download::download(
+        &client,
+        &asset.url,
+        &archive,
+        Some(&checksum),
+        cancel,
+        |received, total| report(app, "apache", &version, received, total, "unduh"),
+    )
+    .await?;
+
+    report(app, "apache", &version, 0, None, "pasang");
+
+    let dir = paths.apache_version_dir(&version);
+    let zip = archive.clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::archive::extract(&zip, &dir)?;
+        if !crate::apache::has_httpd(&dir) {
+            anyhow::bail!("zip Apache tidak berisi bin/httpd.exe");
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
+
+    report(app, "apache", &version, 0, None, "selesai");
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn install_bun(
     app: AppHandle,
@@ -579,25 +656,59 @@ pub fn cancel_download(slot: State<'_, download::Slot>) -> bool {
 pub async fn set_site_php(
     state: State<'_, AppState>,
     id: String,
-    php: String,
+    version: String,
 ) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
     let session = guard
         .as_mut()
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
-    session.set_php(&id, &php).await.map_err(error)?;
+    session.set_php(&id, &version).await.map_err(error)?;
     Ok(session.snapshot().await)
 }
 
 #[tauri::command]
-pub async fn set_default_php(state: State<'_, AppState>, php: String) -> Result<Snapshot, String> {
+pub async fn set_site_backend(
+    state: State<'_, AppState>,
+    id: String,
+    backend: crate::config::Backend,
+) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
     let session = guard
         .as_mut()
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
-    session.set_default_php(&php).map_err(error)?;
+    session
+        .set_site_backend(&id, backend)
+        .await
+        .map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+/// Port Apache terpisah dari 80/443 milik Caddy, jadi nilainya bisa diubah
+/// tanpa menyentuh Caddy.
+#[tauri::command]
+pub async fn set_apache_port(state: State<'_, AppState>, port: u16) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.set_apache_port(port).await.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn set_default_php(
+    state: State<'_, AppState>,
+    version: String,
+) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.set_default_php(&version).map_err(error)?;
     Ok(session.snapshot().await)
 }
 
@@ -658,6 +769,37 @@ pub async fn restart_php(state: State<'_, AppState>, version: String) -> Result<
 
     session.restart_php(&version).await.map_err(error)?;
     Ok(session.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn php_extensions(
+    state: State<'_, AppState>,
+    version: String,
+) -> Result<PhpExtensionsView, String> {
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.php_extensions(&version).await.map_err(error)
+}
+
+#[tauri::command]
+pub async fn set_php_extension(
+    state: State<'_, AppState>,
+    version: String,
+    name: String,
+    enable: bool,
+) -> Result<PhpExtensionsView, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session
+        .set_php_extension(&version, &name, enable)
+        .await
+        .map_err(error)
 }
 
 #[tauri::command]

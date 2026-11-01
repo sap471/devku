@@ -193,6 +193,98 @@ pub async fn caddy_latest(client: &Client) -> Result<RemoteAsset> {
     })
 }
 
+/// Apache tidak menerbitkan biner Windows resmi, jadi DevKu mengambil build
+/// dari Apache Lounge. Halaman unduhannya stabil: satu tautan `Win64` per
+/// rilis, dan berkas checksum SHA-256 di sebelah arsipnya.
+const APACHE_PAGE: &str = "https://www.apachelounge.com/download/";
+
+pub async fn apache_latest(client: &Client) -> Result<RemoteAsset> {
+    let html = client
+        .get(APACHE_PAGE)
+        .send()
+        .await
+        .context("gagal membuka halaman unduhan Apache Lounge")?
+        .error_for_status()
+        .context("halaman unduhan Apache Lounge tidak tersedia")?
+        .text()
+        .await
+        .context("gagal membaca halaman unduhan Apache Lounge")?;
+
+    let (path, filename, version) =
+        parse_apache_page(&html).context("halaman Apache Lounge tidak memuat arsip Win64")?;
+
+    Ok(RemoteAsset {
+        target: "apache",
+        version,
+        url: format!("https://www.apachelounge.com{path}"),
+        filename,
+        // Ukuran tidak dicantumkan di halaman; progres memakai Content-Length.
+        size: 0,
+    })
+}
+
+/// `httpd-2.4.69-261002-Win64-VS18.zip` -> `2.4.69-261002`.
+fn apache_version(filename: &str) -> Option<String> {
+    let rest = filename.strip_prefix("httpd-")?;
+    let end = rest.to_ascii_lowercase().find("-win64")?;
+    Some(rest[..end].to_string())
+}
+
+fn parse_apache_page(html: &str) -> Option<(String, String, String)> {
+    for chunk in html.split("href=\"").skip(1) {
+        let Some(href) = chunk.split('"').next() else {
+            continue;
+        };
+        let lower = href.to_ascii_lowercase();
+        if !href.starts_with("/download/") || !lower.contains("/binaries/httpd-") {
+            continue;
+        }
+        if !lower.ends_with(".zip") || !lower.contains("-win64-") {
+            continue;
+        }
+        let Some(filename) = href.rsplit('/').next().map(|name| name.to_string()) else {
+            continue;
+        };
+        let Some(version) = apache_version(&filename) else {
+            continue;
+        };
+        return Some((href.to_string(), filename, version));
+    }
+    None
+}
+
+/// Berkas checksum Apache Lounge berisi blok per algoritma, bukan format
+/// `sha256sum`, jadi digest diambil dari blok SHA256 khusus berkas ini.
+pub async fn apache_checksum(client: &Client, asset: &RemoteAsset) -> Result<String> {
+    let url = format!("{}.txt", asset.url);
+    let text = client
+        .get(&url)
+        .send()
+        .await
+        .context("gagal mengunduh checksum Apache")?
+        .error_for_status()
+        .context("checksum Apache tidak tersedia")?
+        .text()
+        .await
+        .context("gagal membaca checksum Apache")?;
+
+    apache_checksum_for(&text, &asset.filename)
+        .with_context(|| format!("SHA-256 {} tidak ada di berkas checksum", asset.filename))
+}
+
+pub fn apache_checksum_for(text: &str, filename: &str) -> Option<String> {
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
+        let line = line.trim();
+        if line.starts_with("SHA256-Checksum for:") && line.contains(filename) {
+            return lines
+                .find(|next| !next.trim().is_empty())
+                .map(|digest| digest.trim().to_string());
+        }
+    }
+    None
+}
+
 pub async fn bun_latest(client: &Client) -> Result<RemoteAsset> {
     let release = github_release(client, "oven-sh/bun").await?;
     let wanted = if cfg!(target_arch = "aarch64") {
@@ -646,6 +738,33 @@ mod tests {
             .find(|asset| asset.name.ends_with("windows_amd64.zip"))
             .unwrap();
         assert_eq!(asset.name, "caddy_2.11.7_windows_amd64.zip");
+    }
+
+    #[test]
+    fn apache_page_picks_newest_win64_build() {
+        let html = r#"
+            <a href="/download/VS18/binaries/httpd-2.4.69-261002-Win64-VS18.zip">x</a>
+            <a href="/download/VS18/binaries/httpd-2.4.69-261002-Win64-VS18.zip.asc">pgp</a>
+            <a href="/download/VS18/binaries/httpd-2.4.69-261002-win32-vs18.zip">x86</a>
+            <a href="/download/VS18/binaries/httpd-2.4.62-240904-Win64-VS17.zip">old</a>
+        "#;
+        let (path, filename, version) = parse_apache_page(html).unwrap();
+        assert_eq!(version, "2.4.69-261002");
+        assert_eq!(filename, "httpd-2.4.69-261002-Win64-VS18.zip");
+        assert_eq!(
+            path,
+            "/download/VS18/binaries/httpd-2.4.69-261002-Win64-VS18.zip"
+        );
+    }
+
+    #[test]
+    fn apache_checksum_reads_sha256_block() {
+        let text = "Checksums created with GPGHash\n\nSHA1-Checksum for: httpd-2.4.69.zip:\nAAA\n\nSHA256-Checksum for: httpd-2.4.69.zip:\n77D7\n\nSHA512-Checksum for: httpd-2.4.69.zip:\nBBB\n";
+        assert_eq!(
+            apache_checksum_for(text, "httpd-2.4.69.zip").as_deref(),
+            Some("77D7")
+        );
+        assert!(apache_checksum_for(text, "httpd-other.zip").is_none());
     }
 
     #[test]

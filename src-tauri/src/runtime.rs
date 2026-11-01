@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use crate::apache::ApacheBackend;
 use crate::caddy::{CaddyBackend, WebServerBackend};
 use crate::config::Config;
 use crate::database::{DatabaseBackend, Mariadb};
@@ -20,6 +21,11 @@ pub struct Runtime {
     ports: BTreeMap<String, u16>,
     php: Vec<(String, Supervisor)>,
     caddy: Option<Supervisor>,
+    apache: Option<Supervisor>,
+    /// httpd.conf terakhir yang dipakai proses Apache yang hidup. Dipakai
+    /// untuk menghindari restart saat config tidak berubah.
+    apache_config: Option<String>,
+    apache_error: Option<String>,
     database: Option<Supervisor>,
     /// Database terpasang dan datadir-nya sudah siap, jadi layak ditampilkan
     /// sebagai service meski sedang berhenti.
@@ -45,6 +51,9 @@ impl Runtime {
             ports: BTreeMap::new(),
             php: Vec::new(),
             caddy: None,
+            apache: None,
+            apache_config: None,
+            apache_error: None,
             database: None,
             database_present: false,
             database_error: None,
@@ -72,10 +81,18 @@ impl Runtime {
         let backend = CaddyBackend::new(paths.clone());
         backend.write_config(config, &runtime.ports).await?;
 
+        // Apache dulu supaya Caddy yang meneruskan ke port internalnya tidak
+        // menabrak backend yang belum siap. Kegagalannya dicatat seperti
+        // database: situs Caddy tetap jalan, UI menunjukkan service yang gagal.
+        if let Err(err) = runtime.apply_apache(config, &paths, hook.clone()).await {
+            runtime.apache_error = Some(format!("{err:#}"));
+        }
+
         let spec: ServiceSpec = backend.spec(config, &runtime.ports)?;
         let caddy = Supervisor::start(spec, hook)?;
         if let Err(reason) = caddy.wait_ready(Duration::from_secs(20)).await {
             runtime.shutdown_php().await;
+            runtime.stop_apache().await;
             anyhow::bail!("Caddy gagal siap: {reason}");
         }
         runtime.caddy = Some(caddy);
@@ -113,6 +130,53 @@ impl Runtime {
         self.ports.insert(version.to_string(), port);
         self.php.push((version.to_string(), supervisor));
         Ok(port)
+    }
+
+    /// Nyalakan, matikan, atau mulai ulang httpd sesuai config. Restart hanya
+    /// dilakukan kalau httpd.conf yang dihasilkan berubah, karena Apache tidak
+    /// punya admin API seperti Caddy.
+    pub async fn apply_apache(
+        &mut self,
+        config: &Config,
+        paths: &Paths,
+        hook: Option<Hook>,
+    ) -> Result<()> {
+        if config.apache_sites().next().is_none() {
+            self.stop_apache().await;
+            return Ok(());
+        }
+
+        let backend = ApacheBackend::from_config(paths, config);
+        let text = backend.render(config, &self.ports)?;
+        if self.apache.is_some() && self.apache_config.as_deref() == Some(text.as_str()) {
+            return Ok(());
+        }
+
+        self.stop_apache().await;
+        backend.write_config(config, &self.ports)?;
+        let supervisor = Supervisor::start(backend.spec()?, hook)?;
+        if let Err(reason) = supervisor.wait_ready(Duration::from_secs(15)).await {
+            supervisor.shutdown().await;
+            anyhow::bail!("Apache gagal siap: {reason}");
+        }
+        self.apache = Some(supervisor);
+        self.apache_config = Some(text);
+        Ok(())
+    }
+
+    pub async fn stop_apache(&mut self) {
+        if let Some(supervisor) = self.apache.take() {
+            supervisor.shutdown().await;
+        }
+        self.apache_config = None;
+    }
+
+    pub fn set_apache_error(&mut self, reason: String) {
+        self.apache_error = Some(reason);
+    }
+
+    pub fn clear_apache_error(&mut self) {
+        self.apache_error = None;
     }
 
     /// Hentikan pool yang tidak lagi dipakai site mana pun.
@@ -249,6 +313,16 @@ impl Runtime {
         for (version, supervisor) in &self.php {
             out.push((format!("php-{version}"), supervisor.state().await));
         }
+        if let Some(apache) = &self.apache {
+            out.push(("apache".to_string(), apache.state().await));
+        } else if let Some(reason) = &self.apache_error {
+            out.push((
+                "apache".to_string(),
+                ServiceState::Failed {
+                    reason: reason.clone(),
+                },
+            ));
+        }
         if let Some(database) = &self.database {
             out.push(("mariadb".to_string(), database.state().await));
         } else if let Some(reason) = &self.database_error {
@@ -267,6 +341,7 @@ impl Runtime {
     pub async fn shutdown(self) {
         let Self {
             caddy,
+            apache,
             php,
             database,
             ..
@@ -276,6 +351,9 @@ impl Runtime {
         }
         if let Some(caddy) = caddy {
             caddy.shutdown().await;
+        }
+        if let Some(apache) = apache {
+            apache.shutdown().await;
         }
         for (_, supervisor) in php {
             supervisor.shutdown().await;
