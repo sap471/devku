@@ -99,22 +99,40 @@ impl Mariadb {
             .to_string()
     }
 
+    /// Alamat bind untuk `my.ini`. Loopback IPv6 ikut hanya kalau tumpukan
+    /// IPv6 memang bisa dipakai: mendaftarkannya di mesin tanpa IPv6 membuat
+    /// mysqld gagal bind dan database tidak pernah menyala.
+    fn bind_addresses() -> &'static str {
+        if std::net::TcpListener::bind(("::1", 0)).is_ok() {
+            "127.0.0.1,::1"
+        } else {
+            "127.0.0.1"
+        }
+    }
+
     /// Berkas konfigurasi milik DevKu. `my.ini` yang ditinggalkan penginisialisasi
     /// memuat jalur absolut ke folder saat itu, jadi tidak dipakai.
     fn write_config(&self, port: u16) -> Result<PathBuf> {
         let file = self.paths.mariadb_config();
         let base = self.base_dir();
+        // Dua alamat loopback, bukan hanya IPv4: di Windows `localhost`
+        // dijawab AAAA lebih dulu, jadi klien mencoba ::1 dulu. Tanpa
+        // listener di ::1, percobaan itu menggantung sekitar 2 detik baru
+        // jatuh ke 127.0.0.1 — WordPress dengan DB_HOST=localhost jadi lambat.
+        // Catatan: akun yang di-grant hanya untuk 127.0.0.1 tidak otomatis
+        // cocok dari ::1; beri grant ::1 atau '%' seperti akun root DevKu.
         let text = format!(
             "[mysqld]\n\
              basedir={base}\n\
              datadir={data}\n\
              port={port}\n\
-             bind-address=127.0.0.1\n\
+             bind-address={bind}\n\
              skip-name-resolve\n\
              plugin-dir={base}\\lib\\plugin\n\
              character-sets-dir={base}\\share\\charsets\n",
             base = base.display(),
             data = self.paths.mariadb_data().display(),
+            bind = Self::bind_addresses(),
         );
         crate::paths::write_atomic(&file, &text)?;
         Ok(file)
@@ -382,6 +400,24 @@ mod tests {
     fn sql_literal_doubles_quotes() {
         assert_eq!(Mariadb::sql_literal("rahasia"), "rahasia");
         assert_eq!(Mariadb::sql_literal("o'brien"), "o''brien");
+    }
+
+    #[test]
+    fn config_binds_both_loopback_addresses() {
+        let root = std::env::temp_dir().join(format!("devku-myini-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let backend = Mariadb::new(Paths { root: root.clone() });
+        let file = backend.write_config(3306).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+
+        // `localhost` mencoba ::1 lebih dulu; listener IPv6 mencegah jeda
+        // sekitar 2 detik sebelum klien jatuh ke 127.0.0.1.
+        assert!(text.contains(&format!("bind-address={}", Mariadb::bind_addresses())));
+        assert!(text.contains("port=3306"));
+        assert!(text.contains("skip-name-resolve"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
