@@ -13,13 +13,9 @@ export function isOpen(): boolean {
   return terminal !== null;
 }
 
-export async function open(cwd: string | null): Promise<void> {
-  const pane = document.getElementById("terminal-pane");
-  const host = document.getElementById("terminal");
-  if (!pane || !host) return;
-
-  pane.hidden = false;
-  document.getElementById("terminal-toggle")?.setAttribute("aria-expanded", "true");
+export async function open(cwd: string | null, targetHost?: HTMLElement | null): Promise<void> {
+  const host = targetHost ?? document.getElementById("terminal");
+  if (!host) return;
 
   if (terminal) {
     fitAddon?.fit();
@@ -71,10 +67,6 @@ export async function open(cwd: string | null): Promise<void> {
 }
 
 export async function close(): Promise<void> {
-  const pane = document.getElementById("terminal-pane");
-  if (pane) pane.hidden = true;
-  document.getElementById("terminal-toggle")?.setAttribute("aria-expanded", "false");
-
   window.removeEventListener("resize", refit);
   unlisten.forEach((fn) => fn());
   unlisten = [];
@@ -83,7 +75,7 @@ export async function close(): Promise<void> {
     try {
       await invoke("close_terminal", { id: sessionId });
     } catch {
-      // Shell bisa sudah keluar sendiri; menutup tab tetap berhasil.
+      // Shell might have exited already.
     }
   }
 
@@ -93,26 +85,23 @@ export async function close(): Promise<void> {
   fitAddon = null;
 }
 
-export function toggle(cwd: string | null): void {
+export function toggle(cwd: string | null, targetHost?: HTMLElement | null): void {
   if (terminal) {
     void close();
   } else {
-    void open(cwd);
+    void open(cwd, targetHost);
   }
 }
 
-/// Membuka terminal bila perlu, lalu mengetik satu perintah ke shell yang sama.
-/// `cd` dikirim lebih dulu supaya perintah selalu berjalan di folder situs yang
-/// sedang dipilih, bukan di folder situs sebelumnya.
-export async function run(cwd: string | null, command: string): Promise<void> {
+export async function run(cwd: string | null, command: string, targetHost?: HTMLElement | null): Promise<void> {
   const fresh = !isOpen();
-  await open(cwd);
+  await open(cwd, targetHost);
 
   const id = sessionId;
   if (id === null) return;
 
   if (fresh) {
-    // PowerShell belum siap menerima baris perintah tepat setelah spawn.
+    // PowerShell needs a brief moment after spawn before accepting input lines.
     await new Promise((resolve) => window.setTimeout(resolve, 900));
   }
 
@@ -123,17 +112,23 @@ export async function run(cwd: string | null, command: string): Promise<void> {
   terminal?.focus();
 }
 
-function refit(): void {
+export function refit(): void {
   fitAddon?.fit();
 }
 
 function themeColors() {
-  const styles = getComputedStyle(document.documentElement);
-  const read = (name: string) => styles.getPropertyValue(name).trim();
-  return {
-    background: read("--bg"),
-    foreground: read("--fg"),
-    cursor: read("--accent"),
-    selectionBackground: read("--line"),
-  };
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return dark
+    ? {
+        background: "#0c0d0f",
+        foreground: "#e7e7ea",
+        cursor: "#f59e0b",
+        selectionBackground: "rgba(245, 158, 11, 0.25)",
+      }
+    : {
+        background: "#ffffff",
+        foreground: "#18181b",
+        cursor: "#b45309",
+        selectionBackground: "rgba(180, 83, 9, 0.2)",
+      };
 }

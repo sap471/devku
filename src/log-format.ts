@@ -70,3 +70,28 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1).replace(".", ",")} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
 }
+
+export type RawLogLevel = "error" | "warn" | "info";
+
+export function classifyRawLine(line: string): RawLogLevel {
+  const lower = line.toLowerCase();
+  if (
+    lower.includes("fatal error") ||
+    lower.includes("parse error") ||
+    lower.includes("uncaught exception") ||
+    lower.includes("error:") ||
+    lower.includes("level=error") ||
+    lower.includes("\terror\t")
+  ) {
+    return "error";
+  }
+  if (
+    lower.includes("warning:") ||
+    lower.includes("deprecated:") ||
+    lower.includes("level=warn") ||
+    lower.includes("\twarn\t")
+  ) {
+    return "warn";
+  }
+  return "info";
+}

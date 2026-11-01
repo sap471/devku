@@ -1,154 +1,67 @@
 # Changelog
 
-Semua perubahan yang terlihat oleh pengguna dicatat di sini. Format mengikuti
-[Keep a Changelog](https://keepachangelog.com/id/1.1.0/), versi mengikuti
-[SemVer](https://semver.org/lang/id/).
+All user-facing changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-### Ditambahkan
+### Added
 
-- Arsip engine yang sudah diunduh disimpan, dan pemasangan ulang versi yang sama
-  tidak mengunduh lagi selama checksum-nya cocok. Untuk paket tanpa checksum
-  resmi, digest dicatat setelah unduhan pertama. Bagian Konfigurasi menampilkan
-  jumlah dan ukuran arsip, dengan tombol Bersihkan. (`0e3e090`)
-- Server **MariaDB 11.4.13** lokal lewat panel Database di dasbor: pasang, mulai,
-  stop, dan ceklis autostart sendiri. Versi dipatok dan diverifikasi dengan
-  `sha256sums.txt`. (`80a23e1`)
-- Kredensial database memakai user `root` tanpa password dan hanya mendengar di
-  `127.0.0.1`. Password disimpan di `runtime/mariadb/root.pass`, di luar
-  `config.json`, supaya tidak ikut ter-ekspor. (`80a23e1`)
-- Hapus MariaDB punya ceklis hapus data dan backup `.sql` otomatis ke folder
-  `backups`, yang langsung dibuka setelah selesai. (`80a23e1`)
-- Perintah `mariadb` dan `mariadb-dump` tersedia di terminal DevKu. (`80a23e1`)
-- Daftar **Terpasang** per versi PHP dengan aksi Edit php.ini, Mulai ulang, dan
-  Hapus. Katalog pemasangan hanya menampilkan versi yang belum terpasang.
-  (`e945210`)
-- **Edit php.ini** membuka berkas versi itu di VS Code, Zed, atau Notepad sesuai
-  yang terdeteksi. Perubahan berlaku setelah pool dimulai ulang. (`e945210`)
-- Hapus PHP menonaktifkan situs yang memakainya, memindahkan PHP default, dan
-  mengarahkan ulang Composer. Hapus semua PHP melepas shim dari PATH dan
-  mencapai keadaan 0 PHP terpasang. (`e945210`)
-- Dialog bersama untuk aksi destruktif: judul, daftar data, input, ceklis
-  bertingkat, dan tombol pilihan. Impor config dan hapus situs memakainya.
-  (`20dab20`)
+- Established English as the primary language across all repository documentation, specifications, and domain models (`GLOSSARY.md`).
+- Reworked UI frontend architecture to Vue 3 with Composition API and `<script setup>` for high modularity and low memory footprint.
+- Tauri v2 window customization with borderless window (`decorations: false`), native drag region (`data-tauri-drag-region`), and custom window controls (minimize, maximize, hide to tray).
+- Unified `AppTitlebar.vue` integrating brand identity, top-level tab navigation (Sites vs Settings), live server status badge, quick server start/stop, and collapsible terminal drawer toggle.
+- Dedicated multi-tab Settings view separating PHP runtime management, MariaDB database controls, Caddy web server routing, and Windows PATH/system toolchain configurations.
+- Sub-tabbed Site Detail panel (General info, formatted HTTP/PHP Access Logs, and quick development CLI commands).
+- Add Site Wizard modal with persistent backdrop (prevents accidental dismissal on backdrop clicks), native directory picker, and automatic framework detection.
+- Downloaded engine archives are cached; reinstalling the same version avoids re-downloading as long as checksums match. For packages without official checksums, digests are recorded after first download. Configuration section displays archive count and byte size, with a Clean button. (`0e3e090`)
+- Local **MariaDB 11.4.13** server via Database panel in dashboard: install, start, stop, and independent autostart toggle. Version is pinned and verified with `sha256sums.txt`. (`80a23e1`)
+- Database credentials use `root` with empty password, bound exclusively to `127.0.0.1`. Passwords are saved in `runtime/mariadb/root.pass`, outside `config.json`, to prevent accidental export. (`80a23e1`)
+- MariaDB removal offers options to delete data and auto-export a `.sql` backup to the `backups` directory, which opens upon completion. (`80a23e1`)
+- `mariadb` and `mariadb-dump` commands available in DevKu terminal. (`80a23e1`)
+- Installed PHP versions list with Edit php.ini, Restart Pool, and Remove actions. Installation catalog only lists versions not currently installed. (`e945210`)
+- **Edit php.ini** opens the file in VS Code, Zed, or Notepad as detected. Changes apply after restarting the pool. (`e945210`)
+- Removing PHP disables associated sites, shifts default PHP, and redirects Composer. Removing all PHP unregisters shims from PATH and returns to 0 installed versions. (`e945210`)
+- Shared dialog for destructive actions: title, data rows, input fields, nested checkboxes, and choice buttons. Config import and site removal use this. (`20dab20`)
+- Windows NSIS per-machine installer with default directory `C:\devku`. DevKu runtimes and configs remain in `%APPDATA%\DevKu`. Installer requests UAC. (`6cc4912`)
+- **Open** menu in site panel: Explorer, Terminal, VS Code, Zed, and copy path. Unavailable applications appear disabled rather than disappearing silently. (`6cc4912`)
+- **Open data folder** button for DevKu data folder in dashboard Configuration section. (`6cc4912`)
+- Project foundation: Tauri 2 scaffold, multi-PHP per domain spike, Caddy as edge server, and `localhost` TLD without hosts entries. (`e35dd0a`)
+- Core services: `WebServerBackend` trait, Caddy backend, `PhpManager`, process supervisor with backoff, PortAllocator, and `devku` CLI. (`ea8190e`)
+- App session, framework detection for Laravel, CodeIgniter 3, CodeIgniter 4, and vanilla PHP, Tauri commands, and antislop design guidelines. (`c35746d`)
 
-- Installer Windows NSIS per-machine dengan folder default `C:\devku`. Runtime
-  dan config DevKu tetap berada di `%APPDATA%\DevKu`. Installer meminta UAC.
-  (`6cc4912`)
-- Menu **Buka** di panel situs: Explorer, Terminal, VS Code, Zed, dan salin path.
-  Aplikasi yang tidak terpasang tampil nonaktif, bukan hilang tanpa penjelasan.
-  (`6cc4912`)
-- Tombol **Buka folder** untuk folder data DevKu di bagian Konfigurasi dasbor.
-  (`6cc4912`)
+### Changed
 
-- Fondasi proyek: scaffold Tauri 2, spike arsitektur multi-PHP per domain, Caddy
-  sebagai edge, dan TLD `localhost` tanpa entri hosts. (`e35dd0a`)
-- Core services: trait `WebServerBackend`, backend Caddy, `PhpManager`,
-  supervisor proses dengan backoff, PortAllocator, dan CLI `devku-cli`. (`ea8190e`)
-- Sesi aplikasi, deteksi framework Laravel, CodeIgniter 3, CodeIgniter 4, dan PHP
-  biasa, perintah Tauri, serta arah desain antislop. (`c35746d`)
-- Panel kontrol situs, wizard 3 langkah, log per situs, keadaan kosong, memuat,
-  dan galat, plus plugin dialog. (`9bd13d1`)
-- Dasbor catch-all di port 80 dan status bar service di UI. (`770bb3a`)
-- Service menyala saat aplikasi dibuka dan berhenti bersih saat aplikasi ditutup.
-  (`be8a06f`)
-- Deteksi runtime sistem (bun, node, php, composer) dan panel runtime. (`21896c8`)
-- Terminal PTY sungguhan dengan xterm, bukan penjalan perintah sekali jalan.
-  (`7f39bb4`)
-- Unduh dan pasang PHP dari aplikasi, lengkap dengan verifikasi SHA-256 dan
-  progres unduhan. (`28c14e6`)
-- Unduh Caddy dan Bun dari aplikasi, runner perintah per situs, dan tombol
-  menjalankan berkas TypeScript. (`298902f`)
-- Tray icon dengan menu buka, start semua, stop semua, dan keluar. Menutup
-  jendela kini hanya menyembunyikannya. (`3fcd348`)
-- HTTPS lokal per situs lewat `tls internal` dan tombol Percayai yang menjalankan
-  `caddy trust` tanpa dialog saat startup. (`ba46c69`)
-- Installer Composer: unduh phar resmi, verifikasi SHA-256, uji `--version`, lalu
-  tulis shim `composer.bat` yang memakai PHP di PATH. (`58ee919`)
-- Tombol `http` dan `https` di baris domain, aktif hanya saat situs siap. Render
-  log akses Caddy diringkas per permintaan dengan warna status, durasi, dan ukuran.
-  (`cc4479d`)
-- Baris **Composer global** di dasbor: status folder tool global, daftar tool,
-  serta tombol Daftarkan dan Lepas PATH. (`f78e3c0`)
-- Panduan first-run: status web server, PHP, HTTPS, dan situs pertama dibaca dari
-  keadaan nyata, dengan tombol Lewati yang disimpan di config. (`3f14c8e`)
-- Ekspor dan impor `config.json` dari dasbor maupun CLI. Impor melewati folder
-  yang tidak ada, menonaktifkan situs dengan PHP belum terpasang, dan tidak
-  menyalin status trust antar mesin. (`13a487e`)
-- Auto-start saat login lewat nilai `HKCU\...\Run`: DevKu dibuka dengan flag
-  `--hidden`, tanpa jendela, dan langsung menyalakan service. (`13a487e`)
-- Perintah CLI baru untuk jalur headless: `php-path` mengatur PATH PHP (`d83fe3a`),
-  `runtimes` mendaftar runtime yang terdeteksi (`6eaa4f9`), `install-composer`
-  memasang Composer tanpa UI (`58ee919`), `composer-path` mengatur folder paket
-  global (`f78e3c0`), `trust` memasang CA Caddy (`ba46c69`), serta `autostart`,
-  `export-config`, dan `import-config` (`13a487e`).
+- Unification of GUI and CLI into a single `devku.exe` binary. Without arguments it launches the GUI; with subcommands it runs headlessly. Unrecognized subcommands exit with code 2. (`6a64b8b`)
+- Caddy config is validated before writing, and reload uses `POST /load` so changes apply atomically without restarts. (`76d60bf`)
+- PHP detection changed to folder-first: `PhpManager::installed()` scans `engines/php/*` and sorts versions numerically. Release catalog is merged with local versions, and `config.php.installed` is removed. (`6eaa4f9`)
+- Shell layout inverted: site list is bounded, while the detail pane claims all remaining width when resizing. (`adc080b`)
+- Windows created with `visible: false`, shown upon standard launch and kept hidden when launched at Windows login. (`13a487e`)
+- Documentation: Phase 1 and Phase 3 results, Phase 0 spike reports. (`112335f`)
+- PLAN synchronized with current implementation, including commit references. (`3f14c8e`)
+- Phase 4 marked complete; NSIS installer and auto-update moved to Phase 6. (`38ec738`)
 
-### Diubah
+### Fixed
 
-- Satu binary `devku`: subperintah CLI berjalan sebagai `devku <perintah>`.
-  Tanpa argumen tetap membuka UI, `--hidden` tetap dipakai autostart, dan
-  perintah tidak dikenal kini keluar dengan kode 2. (`6a64b8b`)
-- Config Caddy divalidasi sebelum ditulis, dan reload memakai `POST /load` supaya
-  perubahan berlaku atomik tanpa restart. (`76d60bf`)
-- Deteksi PHP menjadi folder-first: `PhpManager::installed()` memindai
-  `engines/php/*` dan mengurutkan versi secara numerik. Katalog rilis digabung
-  dengan versi lokal, dan `config.php.installed` dihapus. (`6eaa4f9`)
-- Tata letak shell dibalik: daftar situs berhenti di 400px, panel info mengambil
-  seluruh sisa lebar saat jendela diperbesar. (`adc080b`)
-- Jendela dibuat dengan `visible: false`, lalu ditampilkan saat peluncuran biasa
-  dan tetap tersembunyi saat dibuka oleh Windows. (`13a487e`)
-- Dokumentasi: hasil Fase 1 dan Fase 3, laporan spike Fase 0. (`112335f`)
-- PLAN disinkronkan dengan keadaan nyata, termasuk commit rujukan per butir.
-  (`3f14c8e`)
-- Fase 4 ditandai selesai, installer NSIS dan auto-update dipindah ke Fase 6.
-  (`38ec738`)
-- README memuat status fase terbaru dan tautan ke changelog ini.
+- Window controls (minimize, maximize, close) in custom titlebar granted explicit Tauri capability permissions (`core:window:allow-minimize`, `allow-maximize`, `allow-unmaximize`, `allow-toggle-maximize`, `allow-close`, `allow-hide`, `allow-show`, `allow-start-dragging`) and decoupled from header drag region.
+- Checksum lists with `./` prefixes (such as MariaDB) now parse and verify properly. (`80a23e1`)
+- Nested dialog checkboxes restore their initial state when their parent is re-checked. (`80a23e1`)
+- Machine-named root accounts skipped when altering passwords, since server runs with `skip-name-resolve`. (`80a23e1`)
+- `devku --help` and `devku -h` help text prints to terminal in release builds when invoked from PowerShell or cmd. (`fa5035f`)
+- Console window no longer flashes when DevKu queries runtime versions, Composer, or Caddy configuration. (`6cc4912`)
+- `default-run = "devku"` configured so `tauri dev` is unambiguous. (`3246eb8`)
+- Folders without PHP markers can still be registered as sites; framework detection is advisory rather than mandatory. (`35aebff`)
+- Caddy no longer requests CA installation on startup, preventing app hangs waiting for elevation dialogs. (`ba46c69`)
+- First-run wizard no longer reappears after being dismissed or after adding the first site. (`3f14c8e`)
 
-### Diperbaiki
+### Removed
 
-- Daftar checksum yang menulis nama berkas dengan awalan `./`, seperti milik
-  MariaDB, sekarang terbaca dan diverifikasi. (`80a23e1`)
-- Ceklis bertingkat di dialog kembali ke keadaan awalnya saat induknya dicentang
-  lagi, bukan tetap mati setelah sempat disembunyikan. (`80a23e1`)
-- Akun `root` yang ber-host nama mesin dilewati saat mengubah password, karena
-  server berjalan dengan `skip-name-resolve` dan akun itu memang diabaikan.
-  (`80a23e1`)
-- Teks bantuan `devku --help` dan `devku -h` kini juga dicetak di konsol saat
-  build release dijalankan langsung dari PowerShell atau cmd. (`fa5035f`)
-- Jendela console tidak lagi berkedip saat DevKu memeriksa versi runtime, Composer,
-  atau konfigurasi Caddy. (`6cc4912`)
+- Standalone `devku-cli.exe` binary. Legacy scripts should invoke `devku` with the same subcommands. (`6a64b8b`)
+- `php.installed` field in config, replaced by `engines/php` directory scanning. (`6eaa4f9`)
 
-- `default-run = "devku"` supaya `tauri dev` tidak ambigu antara aplikasi dan CLI.
-  (`3246eb8`)
-- Folder tanpa penanda PHP tetap bisa dijadikan situs; deteksi framework menjadi
-  petunjuk, bukan syarat. (`35aebff`)
-- Navigasi kembali ke dasbor, ganti versi PHP per situs, dan pendaftaran `php` ke
-  PATH pengguna. (`d83fe3a`)
-- Caddy tidak lagi meminta instalasi CA saat startup, sehingga aplikasi tidak
-  menggantung menunggu dialog elevasi. (`ba46c69`)
-- Panduan first-run tidak muncul lagi setelah dilewati atau setelah situs pertama
-  ditambahkan. (`3f14c8e`)
+## How to Record Changes
 
-### Dilepas
-
-- Binary `devku-cli.exe`. Skrip lama harus memanggil `devku` dengan subperintah
-  yang sama; tidak ada alias transisi. (`6a64b8b`)
-- Field `php.installed` di config, diganti pemindaian folder `engines/php`.
-  (`6eaa4f9`)
-
-## Cara mencatat perubahan
-
-1. Setiap commit yang mengubah perilaku menambah minimal satu baris di
-   `[Unreleased]`, pada kelompok **Ditambahkan**, **Diubah**, **Diperbaiki**, atau
-   **Dilepas**.
-2. Sertakan hash commit pendek dalam tanda kurung, misalnya `(abc1234)`, supaya
-   perubahan bisa dilacak ke riwayat git. Baris yang dibuat bersama commit-nya
-   sendiri boleh tanpa hash.
-   Alurnya: commit perubahan lebih dulu, salin hash pendeknya, lalu tambahkan
-   baris changelog di commit terpisah.
-3. Tulis dari sudut pandang pengguna: apa yang sekarang bisa dilakukan, bukan
-   nama fungsi internal.
-4. Bahasa Indonesia, kalimat aktif, tanpa em dash dan tanpa basa-basi.
-5. Saat rilis: ganti `[Unreleased]` dengan versi dan tanggal, lalu buka bagian
-   `[Unreleased]` baru di atasnya.
+1. Every commit that modifies behavior must add at least one line under `[Unreleased]` in the **Added**, **Changed**, **Fixed**, or **Removed** section.
+2. Include the short commit hash in parentheses, e.g. `(abc1234)`, to trace changes back to git history.
+3. Write from the user's perspective: describe what can now be done, not internal function names.
+4. Active voice, clear English, no em dashes.
+5. On release: replace `[Unreleased]` with version and date, then open a fresh `[Unreleased]` section above it.

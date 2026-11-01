@@ -1,69 +1,59 @@
 # DevKu
 
-Development environment untuk PHP di Windows. Lihat [`PLAN.md`](PLAN.md).
+PHP development environment for Windows. See [`PLAN.md`](PLAN.md).
 
 ## Toolchain
 
-| Area | Tool | Catatan |
+| Area | Tool | Notes |
 |---|---|---|
-| Package manager (JS/TS) | **Bun** | Selalu `bun`, bukan `npm`/`pnpm`/`yarn` |
-| Node fallback | Node 24 + npm | Hanya jika Bun error atau paket tidak kompatibel |
-| Rust | cargo | Backend Tauri |
-| Frontend | Tauri 2 + WebView2 | Bukan Electron |
+| Package manager (JS/TS) | **Bun** | Always `bun`, never `npm`/`pnpm`/`yarn` |
+| Node fallback | Node 24 + npm | Only if Bun fails or a package is incompatible |
+| Rust | cargo | Tauri backend |
+| Frontend | Tauri 2 + WebView2 | Not Electron |
 
-### Aturan package manager
+### Package Manager Rules
 
-- Install: `bun install` — jangan `npm install`.
-- Tambah paket: `bun add <pkg>` / `bun add -d <pkg>`.
-- Jalankan script: `bun run <script>`.
-- Binary: `bunx <tool>`.
-- Lockfile: commit `bun.lock`. Jangan commit `package-lock.json` atau `pnpm-lock.yaml`.
-- **Fallback:** kalau `bun` gagal (error resolver, postinstall butuh npm, paket native tidak support Bun), baru pakai `npm`. Sebutkan alasan fallback-nya. Jangan diam-diam pindah.
-- Jangan pernah menjalankan `npm install` hanya karena kebiasaan — Bun dulu.
+- Install: `bun install` (do not run `npm install`).
+- Add packages: `bun add <pkg>` / `bun add -d <pkg>`.
+- Run scripts: `bun run <script>`.
+- Binaries: `bunx <tool>`.
+- Lockfile: commit `bun.lock`. Never commit `package-lock.json` or `pnpm-lock.yaml`.
+- **Fallback:** if `bun` fails (resolver error, postinstall requiring npm, native package unsupported by Bun), only then use `npm`. State the fallback reason clearly. Never silently switch.
+- Never run `npm install` out of habit. Bun first.
 
-## Konvensi
+## Conventions
 
-- Komentar kode: hanya yang menjelaskan *mengapa*, bukan *apa*. Tanpa komentar dekoratif.
-- Config pengguna (`config.json`, `.devku.json`) selalu bisa dibaca dan di-diff.
-- Setiap perubahan perilaku dicatat di `CHANGELOG.md` pada bagian `[Unreleased]`, dengan hash commit.
-- Rust: `cargo fmt` + `cargo clippy` sebelum commit.
-- Frontend: `bun run check` untuk typecheck.
+- Code comments: only explain *why*, not *what*. No decorative comments.
+- User configuration (`config.json`, `.devku.json`) must always be human-readable and diffable.
+- Every behavioral change must be documented in `CHANGELOG.md` under `[Unreleased]`, with commit hash.
+- Documentation: English is the primary language across all repository documentation and specifications.
+- Rust: run `cargo fmt` and `cargo clippy` before committing.
+- Frontend: run `bun run check` for typechecking.
 
-## Kuota unduhan
+## Download Quota
 
-Pemilik proyek memakai paket internet berkuota. Binary engine (PHP, Caddy, Bun,
-Composer, MariaDB) berukuran puluhan sampai ratusan MB, jadi uji rutin tidak
-boleh mengunduhnya.
+The project owner uses a metered internet plan. Engine binaries (PHP, Caddy, Bun, Composer, MariaDB) range from tens to hundreds of megabytes, so routine tests must not download them.
 
-- Jangan memakai `DEVKU_HOME` kosong untuk uji. Jalankan
-  `.\scripts\dev\test-home.ps1`, yang membangun home uji dari cache lokal lewat
-  hardlink, tanpa jaringan, dalam hitungan detik.
-- Cache diisi sekali dengan `-Seed`. Perintah itu mengambil dari instalasi nyata
-  di `%APPDATA%\DevKu\engines`, bukan dari internet.
-- Unduhan hanya boleh pada uji akhir sebelum naik versi, dan sebutkan lebih dulu
-  bahwa uji itu akan mengunduh.
-- Untuk membuktikan tidak ada unduhan, jalankan uji dengan
-  `HTTPS_PROXY=http://127.0.0.1:9`. Katalog PHP akan gagal, dan itu memang yang
-  diharapkan.
-- Home uji memakai port database 3307 supaya tidak bentrok dengan instance nyata.
-  Untuk uji yang menyalakan service, hentikan dulu DevKu yang sedang berjalan
-  karena port 80, 443, dan 2019 dipakai bersama, lalu nyalakan lagi setelah
-  selesai.
+- Never use an empty `DEVKU_HOME` for testing. Run `.\scripts\dev\test-home.ps1`, which creates a test home environment from local cache using hardlinks without network access in seconds.
+- Cache is seeded once using `-Seed`. That command pulls from the real installation at `%APPDATA%\DevKu\engines`, not from the internet.
+- Downloads are only permitted during final release tests, and must be announced in advance.
+- To verify zero network downloads during tests, run tests with `HTTPS_PROXY=http://127.0.0.1:9`. The PHP catalog is expected to fail.
+- Test homes use database port 3307 to avoid conflicting with real instances. For tests that start services, stop any running DevKu instance first because ports 80, 443, and 2019 are shared, then restart it after completion.
 
 ## Antislop
 
-UI dan teks wajib mengikuti aturan antislop. Baca skill ini sebelum menyentuh antarmuka:
+UI and text must follow antislop rules. Consult these skills before modifying the interface:
 
-- `antislop` (inti, selalu) di `~/.agents/skills/antislop/SKILL.md`
-- `antislop-ui`, `antislop-copywriting`, `antislop-human`, `antislop-layoutmobile` sesuai bidang yang disentuh
-- `antislop-code` saat menulis atau merapikan komentar
+- `antislop` (core, always)
+- `antislop-ui`, `antislop-copywriting`, `antislop-human`, `antislop-layoutmobile`
+- `antislop-code` when writing or cleaning comments
 
-Arah visual proyek ada di [`DESIGN.md`](DESIGN.md). Jangan mendesain tanpa arah; kalau arah tidak ada, tandai hasilnya sebagai draft.
+Visual design direction is documented in [`DESIGN.md`](DESIGN.md). Never design without direction; if direction is absent, mark the result as a draft.
 
-Aturan yang paling sering dilanggar di proyek ini:
+Key rules enforced in this repository:
 
-- Teks tanpa em dash. Pakai koma, titik, titik dua, atau kurung.
-- Tidak ada tombol atau tautan tanpa perilaku nyata.
-- Setiap tampilan data punya keadaan kosong, memuat, galat, dan siap.
-- Kontras AA wajib di mode terang dan gelap.
-- Angka dan statistik harus nyata, bukan karangan.
+- No em dashes in text. Use commas, periods, colons, or parentheses.
+- No buttons or links without real actions.
+- Every data view must implement four explicit states: empty, loading, error, and ready.
+- WCAG AA contrast required in both light and dark modes.
+- Numbers and metrics must be genuine, never fabricated.

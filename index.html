@@ -5,41 +5,9 @@
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DevKu</title>
-    <script type="module" src="/src/main.ts" defer></script>
   </head>
-
   <body>
-    <header class="bar">
-      <span class="brand">DevKu</span>
-      <span class="bar-state" id="global-state"></span>
-      <div class="bar-actions">
-        <button class="btn" type="button" data-action="toggle-terminal" id="terminal-toggle" aria-expanded="false">Terminal</button>
-        <span class="actions-slot" id="global-actions"></span>
-      </div>
-    </header>
-
-    <div class="notice" id="notice" hidden></div>
-
-    <main class="shell">
-      <section class="list-pane" aria-labelledby="sites-heading">
-        <div class="pane-head">
-          <h1 id="sites-heading">Situs</h1>
-          <button class="btn" type="button" data-action="open-wizard">Tambah situs</button>
-        </div>
-        <div class="list-body" id="site-list"></div>
-      </section>
-
-      <aside class="detail-pane" id="detail" aria-live="polite"></aside>
-    </main>
-
-    <section class="terminal-pane" id="terminal-pane" hidden>
-      <div class="pane-head">
-        <h1>Terminal</h1>
-        <button class="btn btn-quiet" type="button" data-action="toggle-terminal">Tutup</button>
-      </div>
-      <div class="terminal-body" id="terminal"></div>
-    </section>
-
-    <footer class="statusbar" id="statusbar"></footer>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
