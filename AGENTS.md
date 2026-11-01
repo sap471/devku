@@ -29,6 +29,27 @@ Development environment untuk PHP di Windows. Lihat [`PLAN.md`](PLAN.md).
 - Rust: `cargo fmt` + `cargo clippy` sebelum commit.
 - Frontend: `bun run check` untuk typecheck.
 
+## Kuota unduhan
+
+Pemilik proyek memakai paket internet berkuota. Binary engine (PHP, Caddy, Bun,
+Composer, MariaDB) berukuran puluhan sampai ratusan MB, jadi uji rutin tidak
+boleh mengunduhnya.
+
+- Jangan memakai `DEVKU_HOME` kosong untuk uji. Jalankan
+  `.\scripts\dev\test-home.ps1`, yang membangun home uji dari cache lokal lewat
+  hardlink, tanpa jaringan, dalam hitungan detik.
+- Cache diisi sekali dengan `-Seed`. Perintah itu mengambil dari instalasi nyata
+  di `%APPDATA%\DevKu\engines`, bukan dari internet.
+- Unduhan hanya boleh pada uji akhir sebelum naik versi, dan sebutkan lebih dulu
+  bahwa uji itu akan mengunduh.
+- Untuk membuktikan tidak ada unduhan, jalankan uji dengan
+  `HTTPS_PROXY=http://127.0.0.1:9`. Katalog PHP akan gagal, dan itu memang yang
+  diharapkan.
+- Home uji memakai port database 3307 supaya tidak bentrok dengan instance nyata.
+  Untuk uji yang menyalakan service, hentikan dulu DevKu yang sedang berjalan
+  karena port 80, 443, dan 2019 dipakai bersama, lalu nyalakan lagi setelah
+  selesai.
+
 ## Antislop
 
 UI dan teks wajib mengikuti aturan antislop. Baca skill ini sebelum menyentuh antarmuka:
