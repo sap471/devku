@@ -31,17 +31,22 @@ Caddy  ──► php_fastcgi ──► php-cgi (satu pool per versi PHP)
 
 ## Menjalankan core (tanpa UI)
 
-```powershell
-cargo build --manifest-path src-tauri\Cargo.toml --bin devku-cli
+Binary `devku` yang sama juga menjadi CLI: tanpa argumen ia membuka aplikasi,
+dengan subperintah ia berjalan headless.
 
-$cli = "src-tauri\target\debug\devku-cli.exe"
-& $cli install-caddy "C:\path\ke\caddy.exe"
-& $cli install-php "C:\path\ke\php-8.3-nts.zip" 8.3.36
-& $cli add-site app-a "App A" "D:\projects\app-a\public" 8.3.36
-& $cli up
+```powershell
+cargo build --manifest-path src-tauri\Cargo.toml
+
+$devku = "src-tauri\target\debug\devku.exe"
+& $devku install-caddy "C:\path\ke\caddy.exe"
+& $devku install-php "C:\path\ke\php-8.3-nts.zip" 8.3.36
+& $devku add-site app-a "App A" "D:\projects\app-a\public" 8.3.36
+& $devku up
 ```
 
-Perintah lain: `status`, `sites`, `check`, `runtimes`, `php-path`, `install-composer`, `composer-path`, `autostart`, `export-config`, `import-config`, `trust`. `DEVKU_HOME` menimpa lokasi config/engines (default `%APPDATA%\DevKu`).
+Perintah lain: `status`, `sites`, `check`, `runtimes`, `php-path`, `install-composer`, `composer-path`, `autostart`, `export-config`, `import-config`, `trust`. `devku --help` menampilkan daftar lengkap. Exit code: 0 sukses, 1 gagal, 2 perintah tidak dikenal. `DEVKU_HOME` menimpa lokasi config/engines (default `%APPDATA%\DevKu`).
+
+PowerShell tidak menunggu proses GUI yang dipanggil dengan `&`, jadi exit code tidak terbaca langsung. Pakai `| Out-String` untuk menangkap keluaran, atau `Start-Process -Wait -PassThru` bila butuh exit code. Di cmd proses ditunggu seperti biasa.
 
 ## Development
 

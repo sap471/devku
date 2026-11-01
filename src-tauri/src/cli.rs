@@ -1,92 +1,125 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-use devku_lib::caddy::{CaddyBackend, WebServerBackend};
-use devku_lib::config::{Config, Site};
-use devku_lib::paths::Paths;
-use devku_lib::php::PhpManager;
-use devku_lib::proc::ServiceState;
-use devku_lib::runtime::{PHP_PORT_START, Runtime};
+use crate::caddy::{CaddyBackend, WebServerBackend};
+use crate::config::{Config, Site};
+use crate::paths::Paths;
+use crate::php::PhpManager;
+use crate::proc::ServiceState;
+use crate::runtime::{PHP_PORT_START, Runtime};
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+/// Hasil dispatch yang tidak bisa dinyatakan dengan `Result`: perintah tak
+/// dikenal bukan kegagalan, tetapi punya exit code sendiri.
+enum Status {
+    Ok,
+    UnknownCommand,
+}
 
-    match args.first().map(String::as_str) {
-        Some("status") => status(),
-        Some("sites") => sites(),
-        Some("check") => check().await,
-        Some("install-php") => {
-            let zip = args
-                .get(1)
-                .context("pakai: devku-cli install-php <zip> <versi>")?;
-            let version = args
-                .get(2)
-                .context("pakai: devku-cli install-php <zip> <versi>")?;
-            install_php(zip, version)
-        }
-        Some("install-caddy") => {
-            let source = args
-                .get(1)
-                .context("pakai: devku-cli install-caddy <path-ke-caddy>")?;
-            install_caddy(source)
-        }
-        Some("add-site") => add_site(&args),
-        Some("php-path") => php_path(args.get(1).map(String::as_str)),
-        Some("up") => up(&args).await,
-        Some("runtimes") => runtimes(),
-        Some("install-composer") => install_composer().await,
-        Some("composer-path") => composer_path(args.get(1).map(String::as_str)),
-        Some("autostart") => autostart(args.get(1).map(String::as_str)),
-        Some("export-config") => export_config(
-            args.get(1)
-                .context("pakai: devku-cli export-config <berkas>")?,
-        ),
-        Some("import-config") => {
-            import_config(
-                args.get(1)
-                    .context("pakai: devku-cli import-config <berkas>")?,
-            )
-            .await
-        }
-        Some("trust") => trust().await,
-        Some(other) => {
-            help();
-            bail!("perintah tidak dikenal: {other}")
-        }
-        None => {
-            help();
-            Ok(())
+pub fn run(args: &[String]) -> ExitCode {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build();
+
+    let Ok(runtime) = runtime else {
+        eprintln!("DevKu: gagal menyiapkan runtime");
+        return ExitCode::FAILURE;
+    };
+
+    match runtime.block_on(dispatch(args)) {
+        Ok(Status::Ok) => ExitCode::SUCCESS,
+        Ok(Status::UnknownCommand) => ExitCode::from(2),
+        Err(err) => {
+            eprintln!("DevKu: {err:#}");
+            ExitCode::FAILURE
         }
     }
 }
 
-fn help() {
-    println!(
-        "devku-cli — kontrol core services tanpa UI\n\n\
-         USAGE:\n  \
-         devku-cli status\n  \
-         devku-cli sites\n  \
-         devku-cli check\n  \
-         devku-cli install-php <zip> <versi>\n  \
-         devku-cli install-caddy <path>\n  \
-         devku-cli add-site <id> <nama> <folder> <versi-php> [domain]\n  \
-         devku-cli php-path [on|off]\n  \
-         devku-cli up [--seconds N]\n  \
-         devku-cli runtimes\n  \
-         devku-cli install-composer\n  \
-         devku-cli composer-path [on|off]\n  \
-         devku-cli autostart [on|off]\n  \
-         devku-cli export-config <berkas>\n  \
-         devku-cli import-config <berkas>\n  \
-         devku-cli trust\n\n\
-         DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
-    );
+async fn dispatch(args: &[String]) -> Result<Status> {
+    let Some(command) = args.first().map(String::as_str) else {
+        print_help();
+        return Ok(Status::Ok);
+    };
+
+    match command {
+        "status" => status()?,
+        "sites" => sites()?,
+        "check" => check().await?,
+        "install-php" => {
+            let zip = args
+                .get(1)
+                .context("pakai: devku install-php <zip> <versi>")?;
+            let version = args
+                .get(2)
+                .context("pakai: devku install-php <zip> <versi>")?;
+            install_php(zip, version)?;
+        }
+        "install-caddy" => {
+            let source = args
+                .get(1)
+                .context("pakai: devku install-caddy <path-ke-caddy>")?;
+            install_caddy(source)?;
+        }
+        "add-site" => add_site(args)?,
+        "php-path" => php_path(args.get(1).map(String::as_str))?,
+        "up" => up(args).await?,
+        "runtimes" => runtimes()?,
+        "install-composer" => install_composer().await?,
+        "composer-path" => composer_path(args.get(1).map(String::as_str))?,
+        "autostart" => autostart(args.get(1).map(String::as_str))?,
+        "export-config" => {
+            export_config(args.get(1).context("pakai: devku export-config <berkas>")?)?
+        }
+        "import-config" => {
+            import_config(args.get(1).context("pakai: devku import-config <berkas>")?).await?;
+        }
+        "trust" => trust().await?,
+        other => {
+            eprintln!("perintah tidak dikenal: {other}");
+            eprint_help();
+            return Ok(Status::UnknownCommand);
+        }
+    }
+
+    Ok(Status::Ok)
+}
+
+pub fn print_help() {
+    println!("{}", help_text());
+}
+
+fn eprint_help() {
+    eprintln!("{}", help_text());
+}
+
+fn help_text() -> &'static str {
+    "devku: development environment PHP untuk Windows\n\n\
+     USAGE:\n  \
+     devku                       buka aplikasi\n  \
+     devku --hidden              buka di latar belakang saat login\n  \
+     devku status\n  \
+     devku sites\n  \
+     devku check\n  \
+     devku install-php <zip> <versi>\n  \
+     devku install-caddy <path>\n  \
+     devku add-site <id> <nama> <folder> <versi-php> [domain]\n  \
+     devku php-path [on|off]\n  \
+     devku up [--seconds N]\n  \
+     devku runtimes\n  \
+     devku install-composer\n  \
+     devku composer-path [on|off]\n  \
+     devku autostart [on|off]\n  \
+     devku export-config <berkas>\n  \
+     devku import-config <berkas>\n  \
+     devku trust\n\n\
+     Exit code: 0 sukses, 1 gagal, 2 perintah tidak dikenal.\n\
+     DEVKU_HOME mengubah lokasi config/engines (default: %APPDATA%\\DevKu)."
 }
 
 fn php_path(mode: Option<&str>) -> Result<()> {
@@ -107,22 +140,22 @@ fn php_path(mode: Option<&str>) -> Result<()> {
                     .cloned()
                     .context("belum ada PHP terpasang")?
             };
-            devku_lib::path_env::register(&paths, &version)?;
+            crate::path_env::register(&paths, &version)?;
             println!(
                 "php {} -> {}",
                 version,
-                devku_lib::path_env::bin_dir(&paths).display()
+                crate::path_env::bin_dir(&paths).display()
             );
         }
         Some("off") => {
-            devku_lib::path_env::unregister(&paths)?;
+            crate::path_env::unregister(&paths)?;
             println!(
                 "{} dilepas dari PATH pengguna",
-                devku_lib::path_env::bin_dir(&paths).display()
+                crate::path_env::bin_dir(&paths).display()
             );
         }
         _ => {
-            let status = devku_lib::path_env::status(&paths);
+            let status = crate::path_env::status(&paths);
             println!("folder     {}", status.dir);
             println!(
                 "di PATH    {}",
@@ -197,7 +230,7 @@ async fn check() -> Result<()> {
     config.validate()?;
 
     let versions = config.php_versions_in_use();
-    let allocation = devku_lib::ports::allocate(&versions, PHP_PORT_START)?;
+    let allocation = crate::ports::allocate(&versions, PHP_PORT_START)?;
     let ports: BTreeMap<String, u16> = allocation.into_iter().collect();
 
     let caddy = CaddyBackend::new(paths.clone());
@@ -255,7 +288,7 @@ fn add_site(args: &[String]) -> Result<()> {
     if !path.exists() {
         bail!("folder {} tidak ada", path.display());
     }
-    let root = devku_lib::detect::detect(&path)
+    let root = crate::detect::detect(&path)
         .map(|project| project.project_root)
         .unwrap_or_else(|| path.clone());
 
@@ -331,7 +364,7 @@ fn parse_seconds(args: &[String]) -> Result<Option<u64>> {
 /// sebagai runtime sistem atau bawaan, lengkap dengan jalurnya.
 fn runtimes() -> Result<()> {
     let paths = Paths::resolve();
-    for runtime in devku_lib::runtime_detect::detect(&paths) {
+    for runtime in crate::runtime_detect::detect(&paths) {
         let version = runtime.version.as_deref().unwrap_or("-");
         let path = runtime.path.as_deref().unwrap_or("");
         println!(
@@ -350,7 +383,7 @@ async fn install_composer() -> Result<()> {
 
     eprintln!("[devku] menyiapkan Composer...");
     let mut last = "";
-    let installed = devku_lib::composer::install(&paths, &cancel, |stage, _, _| {
+    let installed = crate::composer::install(&paths, &cancel, |stage, _, _| {
         if stage != last {
             eprintln!("[devku] {stage}");
             last = stage;
@@ -359,26 +392,20 @@ async fn install_composer() -> Result<()> {
     .await?;
 
     println!("Composer {} terpasang", installed.version);
-    println!(
-        "phar         {}",
-        devku_lib::composer::phar(&paths).display()
-    );
+    println!("phar         {}", crate::composer::phar(&paths).display());
     println!(
         "php          {} ({})",
         installed.php.path.display(),
         installed.php.source
     );
-    println!(
-        "shim         {}",
-        devku_lib::composer::shim(&paths).display()
-    );
+    println!("shim         {}", crate::composer::shim(&paths).display());
     Ok(())
 }
 
 /// Kelola folder paket global Composer di PATH pengguna. Tanpa argumen,
 /// tampilkan lokasi dan tool yang terlihat di dalamnya.
 fn composer_path(mode: Option<&str>) -> Result<()> {
-    let dir = devku_lib::composer::global_bin_dir();
+    let dir = crate::composer::global_bin_dir();
 
     match mode {
         Some("on") => {
@@ -388,15 +415,15 @@ fn composer_path(mode: Option<&str>) -> Result<()> {
                     dir.display()
                 );
             }
-            devku_lib::path_env::add_dir(&dir)?;
+            crate::path_env::add_dir(&dir)?;
             println!("{} ditambahkan ke PATH pengguna", dir.display());
         }
         Some("off") => {
-            devku_lib::path_env::remove_dir(&dir)?;
+            crate::path_env::remove_dir(&dir)?;
             println!("{} dilepas dari PATH pengguna", dir.display());
         }
         _ => {
-            let status = devku_lib::composer::global_status();
+            let status = crate::composer::global_status();
             println!("folder     {}", status.dir);
             println!(
                 "di PATH    {}",
@@ -423,21 +450,21 @@ fn autostart(mode: Option<&str>) -> Result<()> {
 
     match mode {
         Some("on") => {
-            devku_lib::autostart::set_enabled(&exe, true)?;
+            crate::autostart::set_enabled(&exe, true)?;
             println!(
                 "DevKu akan dibuka saat login: {}",
-                devku_lib::autostart::command_line(&exe)
+                crate::autostart::command_line(&exe)
             );
         }
         Some("off") => {
-            devku_lib::autostart::set_enabled(&exe, false)?;
+            crate::autostart::set_enabled(&exe, false)?;
             println!("DevKu tidak lagi dibuka saat login");
         }
         _ => {
-            println!("target     {}", devku_lib::autostart::command_line(&exe));
+            println!("target     {}", crate::autostart::command_line(&exe));
             println!(
                 "di startup {}",
-                if devku_lib::autostart::is_enabled(&exe) {
+                if crate::autostart::is_enabled(&exe) {
                     "ya"
                 } else {
                     "tidak"
@@ -464,7 +491,7 @@ fn export_config(target: &str) -> Result<()> {
 async fn import_config(source: &str) -> Result<()> {
     let text =
         std::fs::read_to_string(source).with_context(|| format!("gagal membaca {source}"))?;
-    let mut session = devku_lib::session::Session::new(Paths::resolve(), None)?;
+    let mut session = crate::session::Session::new(Paths::resolve(), None)?;
     let report = session.import_config(&text).await?;
 
     println!("{} situs diimpor", report.imported);

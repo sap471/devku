@@ -127,7 +127,7 @@ impl WebServerBackend for CaddyBackend {
         // skip_install_trust: tanpa ini Caddy memasang CA ke trust store saat
         // startup dan di Windows itu memunculkan dialog "Security Warning"
         // yang menggantung server sampai diklik. Pemasangan jadi lewat tombol
-        // Percayai / `devku-cli trust` yang non-interaktif. auto_https dibiarkan
+        // Percayai / `devku trust` yang non-interaktif. auto_https dibiarkan
         // menyala: auto_https off menggagalkan pembuatan cert internal; label
         // http:///https:// eksplisit per situs sudah mencegah redirect.
         let mut out = String::from("{\n\tadmin localhost:2019\n\tskip_install_trust\n}\n");
@@ -187,7 +187,7 @@ impl WebServerBackend for CaddyBackend {
     fn spec(&self, _config: &Config, _php_ports: &BTreeMap<String, u16>) -> Result<ServiceSpec> {
         if !self.is_installed() {
             bail!(
-                "Caddy belum terpasang di {}; jalankan `devku-cli install-caddy <path>`",
+                "Caddy belum terpasang di {}; jalankan `devku install-caddy <path>`",
                 self.binary().display()
             );
         }
