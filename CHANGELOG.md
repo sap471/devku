@@ -6,6 +6,9 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Added
 
+- Optional Apache backend per site, still fronted by Caddy: Caddy keeps 80/443 and reverse-proxies Apache sites to a loopback `httpd` (default `127.0.0.1:8080`) with the Host header preserved, so every site keeps its domain and HTTPS and never exposes a port. Apache has its own generated `httpd.conf` and its own Settings tab, separate from the Caddyfile. It runs PHP through the same php-cgi pool via `mod_proxy_fcgi`, starts only while at least one enabled site uses it, and restarts only when its generated config changes. DevKu installs Apache itself: it picks the latest Win64 build from Apache Lounge, verifies the published SHA-256, and extracts it to `engines/apache/<version>`. The internal port rejects 80, 443, and 2019. New commands: `set_site_backend`, `set_apache_port`, `install_apache`. (`026fc15`, `46e46f9`)
+- Live log: toolbar toggle in the site Log tab that repolls `tail_log` every 2 seconds while the tab is open, removing the need to press Refresh to follow incoming entries. Polling pauses when leaving the tab and resumes with the toggle state remembered. (`46e46f9`)
+- PHP extension manager in the PHP settings tab: per-version list combining `ext/php_*.dll` dlls and `extension=`/`zend_extension=` directives in php.ini, shown as rows with sliders. Toggling rewrites php.ini atomically and rejects enabling extensions whose dll is missing; when the php-cgi pool of that version is live the card offers a one-click pool restart since php-cgi only reads php.ini at startup. New commands: `php_extensions`, `set_php_extension`. (`026fc15`, `46e46f9`)
 - Established English as the primary language across all repository documentation, specifications, and domain models (`GLOSSARY.md`). (`3f0507a`)
 - Reworked UI frontend architecture to Vue 3 with Composition API and `<script setup>` for high modularity and low memory footprint. (`3f0507a`)
 - Tauri v2 window customization with borderless window (`decorations: false`), native drag region (`data-tauri-drag-region`), and custom window controls (minimize, maximize, hide to tray). (`3f0507a`)
@@ -31,6 +34,7 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Changed
 
+- Development servers moved from Vite 1420 / HMR 1421 to 1441 / 1442, in both `vite.config.ts` and `src-tauri/tauri.conf.json`, so `tauri dev` no longer collides with other local tools holding the old ports. (`e0ac6db`)
 - Unification of GUI and CLI into a single `devku.exe` binary. Without arguments it launches the GUI; with subcommands it runs headlessly. Unrecognized subcommands exit with code 2. (`6a64b8b`)
 - Caddy config is validated before writing, and reload uses `POST /load` so changes apply atomically without restarts. (`76d60bf`)
 - PHP detection changed to folder-first: `PhpManager::installed()` scans `engines/php/*` and sorts versions numerically. Release catalog is merged with local versions, and `config.php.installed` is removed. (`6eaa4f9`)
@@ -38,10 +42,11 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 - Windows created with `visible: false`, shown upon standard launch and kept hidden when launched at Windows login. (`13a487e`)
 - Documentation: Phase 1 and Phase 3 results, Phase 0 spike reports. (`112335f`)
 - PLAN synchronized with current implementation, including commit references. (`3f14c8e`)
-- Phase 4 marked complete; NSIS installer and auto-update moved to Phase 6. (`38ec738`)
+- Phase 4 marked complete; signed auto-update and a clean-machine installer test moved to Phase 6. NSIS packaging itself was already in place from `6cc4912`. (`38ec738`)
 
 ### Fixed
 
+- Local apps that set `DB_HOST=localhost` no longer stall about 2 seconds per request: MariaDB now also listens on the IPv6 loopback (`bind-address=127.0.0.1,::1`) when IPv6 is available, because Windows answers `localhost` with `::1` first and the unusable address cost ~2 s before the client fell back to IPv4. Measured on a WordPress site: 2.4 s down to 0.3 s. IPv4-only config is kept on machines without IPv6 so the server still starts. (`74386fd`)
 - Window controls (minimize, maximize, close) in custom titlebar granted explicit Tauri capability permissions (`core:window:allow-minimize`, `allow-maximize`, `allow-unmaximize`, `allow-toggle-maximize`, `allow-close`, `allow-hide`, `allow-show`, `allow-start-dragging`) and decoupled from header drag region.
 - Checksum lists with `./` prefixes (such as MariaDB) now parse and verify properly. (`80a23e1`)
 - Nested dialog checkboxes restore their initial state when their parent is re-checked. (`80a23e1`)
@@ -52,6 +57,7 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 - Folders without PHP markers can still be registered as sites; framework detection is advisory rather than mandatory. (`35aebff`)
 - Caddy no longer requests CA installation on startup, preventing app hangs waiting for elevation dialogs. (`ba46c69`)
 - First-run wizard no longer reappears after being dismissed or after adding the first site. (`3f14c8e`)
+- Changing a site's PHP version works again: `set_site_php` and `set_default_php` argument renamed from `php` to `version` to match what the frontend sends, and the Windows "launch at login" toggle now sends `enabled` as the command expects.
 
 ### Removed
 

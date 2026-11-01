@@ -13,20 +13,23 @@ Replace XAMPP/Laragon with something smaller, faster, and more manageable. Full 
 | 2 | UI project manager (Vue 3 rework) | ✅ sites list, custom titlebar, settings page, wizard, logs |
 | 3 | Runtime integration (Bun/Node/PHP/Composer) | ✅ [results](docs/fase-3.md) |
 | 4 | Polish: tray, SSL trust, onboarding, autostart | ✅ |
-| 5 | Apache backend | pending |
+| 5 | Apache backend | ✅ internal `httpd` behind Caddy, auto-installed |
 | 6 | Distribution: NSIS and signed auto-updates | NSIS created, auto-update deferred |
 
 ## How It Works
 
 ```
-Browser :80
+Browser :80/:443
    │
    ▼
-Caddy  ──► php_fastcgi ──► php-cgi (one pool per PHP version)
+Caddy ──┬── php_fastcgi ──► php-cgi (one pool per PHP version)
+        └── reverse_proxy ──► httpd :8080 ──► php-cgi (sites that choose Apache)
 ```
 
 - `*.localhost` resolves natively on Windows 11 without editing `hosts` and without administrator privileges.
 - Each PHP version runs its own dedicated `php-cgi` pool, allowing App A to run PHP 8.1 while App B runs PHP 8.4.
+- Caddy is the only entry point: it owns 80/443, TLS, and the domain, then forwards sites whose backend is Apache to a loopback `httpd` on port 8080. Apache sites therefore keep the same URL and HTTPS as everything else; port 8080 is internal and never exposed.
+- Apache has its own generated `httpd.conf` and its own Settings tab, separate from the Caddyfile. DevKu installs it itself from Apache Lounge with SHA-256 verification, and `httpd` starts only while at least one site uses it.
 - Processes are supervised from within the DevKu binary. If a `php-cgi` instance exits unexpectedly, it is restarted with exponential backoff.
 
 ## Running Core (Headless / CLI)

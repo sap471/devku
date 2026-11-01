@@ -9,7 +9,7 @@ PHP development environment for Windows: lightweight, multi-PHP per domain, inte
 - [x] **Phase 2**: Project manager (UI site list + wizard + download/install PHP from app, reworked to Vue 3)
 - [x] **Phase 3**: Runtime integration (runtime detection, PTY terminal, script runner, Caddy/Bun/Composer downloads) -> [results](docs/fase-3.md)
 - [x] **Phase 4**: Polish (tray, SSL trust, onboarding, export/import config, auto-start login)
-- [ ] **Phase 5 (v2)**: Pluggable backend (Apache as an option via Caddy reverse proxy)
+- [x] **Phase 5 (v2)**: Pluggable backend (Apache as an option via Caddy reverse proxy)
 - [ ] **Phase 6 (later)**: Distribution (NSIS installer and signed auto-updates)
 
 ---
