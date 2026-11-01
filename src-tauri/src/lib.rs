@@ -105,6 +105,7 @@ pub fn run() {
             commands::reset_database_password,
             commands::remove_database,
             commands::open_backups,
+            commands::clear_downloads,
             commands::install_caddy,
             commands::install_bun,
             commands::install_composer,

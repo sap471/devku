@@ -117,6 +117,14 @@ pub struct Snapshot {
     pub services: Vec<ServiceView>,
     /// Server database lokal, termasuk saat belum terpasang.
     pub database: DatabaseView,
+    /// Arsip engine yang tersimpan untuk pemasangan ulang.
+    pub downloads: DownloadsView,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DownloadsView {
+    pub files: usize,
+    pub bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -282,6 +290,10 @@ impl Session {
             sites,
             services,
             database,
+            downloads: {
+                let (files, bytes) = crate::download::cached_archives(&self.paths);
+                DownloadsView { files, bytes }
+            },
         }
     }
 

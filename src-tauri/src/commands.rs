@@ -412,8 +412,6 @@ async fn install_php_inner(
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         manager.extract(&zip, &install_version)?;
         manager.ensure_ini(&install_version)?;
-        // Zip 35 MB tidak ada gunanya disimpan setelah diekstrak.
-        let _ = std::fs::remove_file(&zip);
         Ok(())
     })
     .await
@@ -471,7 +469,6 @@ async fn install_caddy_inner(
     let zip = archive.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         crate::archive::extract(&zip, &dir)?;
-        let _ = std::fs::remove_file(&zip);
         Ok(())
     })
     .await
@@ -534,7 +531,6 @@ async fn install_bun_inner(
     let zip = archive.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         crate::archive::extract(&zip, &dir)?;
-        let _ = std::fs::remove_file(&zip);
         Ok(())
     })
     .await
@@ -752,7 +748,6 @@ async fn install_database_inner(
     let zip = archive.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         crate::archive::extract(&zip, &dir)?;
-        let _ = std::fs::remove_file(&zip);
         Ok(())
     })
     .await
@@ -855,6 +850,18 @@ pub async fn open_backups(state: State<'_, AppState>) -> Result<String, String> 
     std::fs::create_dir_all(paths.backups()).map_err(|err| error(anyhow::Error::from(err)))?;
     crate::launcher::open(&paths.backups(), "explorer").map_err(error)?;
     Ok(paths.backups().to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn clear_downloads(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let paths = session_paths(&state).await?;
+    crate::download::clear_archives(&paths).map_err(error)?;
+
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    Ok(session.snapshot().await)
 }
 
 #[derive(Serialize)]

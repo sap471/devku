@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -331,6 +331,9 @@ pub async fn mariadb_checksum(client: &Client) -> Result<String> {
 /// Mengunduh ke `dest` sambil menghitung checksum. Algoritmanya dipilih dari
 /// panjang nilai yang diumumkan (64 = SHA-256, 128 = SHA-512). Berkas yang tidak
 /// cocok langsung dihapus, jadi yang tersisa di disk selalu bisa dipercaya.
+///
+/// Arsip yang sudah ada dan cocok dilewati tanpa menyentuh jaringan. Pemasangan
+/// ulang versi yang sama jadi tidak memakai kuota.
 pub async fn download(
     client: &Client,
     url: &str,
@@ -341,6 +344,12 @@ pub async fn download(
 ) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
+    }
+
+    if archive_is_trusted(dest, expected) {
+        let size = std::fs::metadata(dest).map(|meta| meta.len()).unwrap_or(0);
+        progress(size, Some(size));
+        return Ok(());
     }
 
     let response = client
@@ -390,7 +399,117 @@ pub async fn download(
     drop(file);
 
     hasher.verify(dest, expected)?;
+
+    // Catat sha256 supaya pemasangan berikutnya bisa memakai berkas ini tanpa
+    // mengunduh lagi, termasuk paket yang tidak punya checksum resmi.
+    if let Ok(digest) = digest_of(dest, 64) {
+        let _ = crate::paths::write_atomic(&sidecar(dest), &format!("{digest}\n"));
+    }
+
     progress(received, total);
+    Ok(())
+}
+
+/// Arsip dianggap siap pakai kalau checksum-nya cocok dengan yang diumumkan,
+/// atau dengan catatan dari unduhan sebelumnya kalau tidak ada yang diumumkan.
+fn archive_is_trusted(dest: &Path, expected: Option<&str>) -> bool {
+    if !dest.exists() {
+        return false;
+    }
+
+    if let Some(value) = expected.map(str::trim).filter(|value| !value.is_empty()) {
+        return digest_of(dest, value.len())
+            .map(|digest| digest.eq_ignore_ascii_case(value))
+            .unwrap_or(false);
+    }
+
+    let recorded = std::fs::read_to_string(sidecar(dest))
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty());
+
+    let Some(recorded) = recorded else {
+        return false;
+    };
+
+    digest_of(dest, 64)
+        .map(|digest| digest.eq_ignore_ascii_case(&recorded))
+        .unwrap_or(false)
+}
+
+fn sidecar(path: &Path) -> PathBuf {
+    path.with_extension("sha256")
+}
+
+fn digest_of(path: &Path, hex_length: usize) -> Result<String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = vec![0u8; 64 * 1024];
+
+    let digest = if hex_length == 128 {
+        let mut hasher = Sha512::new();
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        hex(&hasher.finalize())
+    } else {
+        let mut hasher = Sha256::new();
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        hex(&hasher.finalize())
+    };
+
+    Ok(digest)
+}
+
+/// Jumlah dan ukuran arsip yang tersimpan, untuk ditampilkan di UI.
+pub fn cached_archives(paths: &crate::paths::Paths) -> (usize, u64) {
+    let mut files = 0;
+    let mut bytes = 0;
+
+    if let Ok(entries) = std::fs::read_dir(paths.downloads()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) == Some("sha256") {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata()
+                && meta.is_file()
+            {
+                files += 1;
+                bytes += meta.len();
+            }
+        }
+    }
+
+    (files, bytes)
+}
+
+/// Membuang arsip tersimpan. Semuanya bisa diunduh lagi saat dibutuhkan.
+pub fn clear_archives(paths: &crate::paths::Paths) -> Result<()> {
+    let dir = paths.downloads();
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        if entry.path().is_file() {
+            std::fs::remove_file(entry.path())
+                .with_context(|| format!("gagal menghapus {}", entry.path().display()))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -736,5 +855,120 @@ mod tests {
         assert!(manager.installed().contains(&release.version));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn cache_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("devku-download-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn matching_archive_is_reused_without_touching_the_network() {
+        let dir = cache_dir("cache-hit");
+        let dest = dir.join("paket.zip");
+        std::fs::write(&dest, b"isi arsip uji").unwrap();
+        let digest = digest_of(&dest, 64).unwrap();
+
+        let client = reqwest::Client::new();
+        let cancel = AtomicBool::new(false);
+        let mut reported = 0u64;
+
+        // URL yang tidak melayani apa pun: kalau unduhan tetap dicoba, tes gagal.
+        let result = download(
+            &client,
+            "http://127.0.0.1:9/paket.zip",
+            &dest,
+            Some(&digest),
+            &cancel,
+            |received, _| reported = received,
+        )
+        .await;
+
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(reported, std::fs::metadata(&dest).unwrap().len());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"isi arsip uji");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn archive_with_wrong_checksum_is_downloaded_again() {
+        let dir = cache_dir("cache-miss");
+        let dest = dir.join("paket.zip");
+        std::fs::write(&dest, b"isi arsip uji").unwrap();
+        let wrong = "0".repeat(64);
+
+        let client = reqwest::Client::new();
+        let cancel = AtomicBool::new(false);
+
+        let result = download(
+            &client,
+            "http://127.0.0.1:9/paket.zip",
+            &dest,
+            Some(&wrong),
+            &cancel,
+            |_, _| {},
+        )
+        .await;
+
+        assert!(result.is_err(), "checksum salah tidak boleh dipercaya");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn recorded_digest_is_enough_when_no_checksum_is_announced() {
+        let dir = cache_dir("cache-sidecar");
+        let dest = dir.join("bun.zip");
+        std::fs::write(&dest, b"bun").unwrap();
+        let digest = digest_of(&dest, 64).unwrap();
+        std::fs::write(sidecar(&dest), format!("{digest}\n")).unwrap();
+
+        let client = reqwest::Client::new();
+        let cancel = AtomicBool::new(false);
+
+        let result = download(
+            &client,
+            "http://127.0.0.1:9/bun.zip",
+            &dest,
+            None,
+            &cancel,
+            |_, _| {},
+        )
+        .await;
+
+        assert!(result.is_ok(), "{result:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn archive_without_record_is_never_trusted() {
+        let dir = cache_dir("cache-unknown");
+        let dest = dir.join("bun.zip");
+        std::fs::write(&dest, b"bun").unwrap();
+
+        let client = reqwest::Client::new();
+        let cancel = AtomicBool::new(false);
+
+        let result = download(
+            &client,
+            "http://127.0.0.1:9/bun.zip",
+            &dest,
+            None,
+            &cancel,
+            |_, _| {},
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "tanpa catatan checksum, unduhan harus dicoba"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

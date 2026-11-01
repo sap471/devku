@@ -44,6 +44,12 @@ interface Snapshot {
   sites: SiteView[];
   services: ServiceView[];
   database: DatabaseView;
+  downloads: DownloadsView;
+}
+
+interface DownloadsView {
+  files: number;
+  bytes: number;
 }
 
 interface PathStatus {
@@ -1415,6 +1421,19 @@ function renderConfigSection(): string {
       <span class="spacer"></span>
       <button class="btn" type="button" data-action="open-data-folder">Buka folder</button>
     </div>
+    <div class="path-row">
+      <span class="catalog-version">Unduhan</span>
+      <span class="tag">${
+        snapshot && snapshot.downloads.files > 0
+          ? `${snapshot.downloads.files} berkas · ${formatBytes(snapshot.downloads.bytes)}`
+          : "kosong"
+      }</span>
+      <span class="hint">Arsip engine disimpan supaya memasang ulang tidak mengunduh lagi.</span>
+      <span class="spacer"></span>
+      <button class="btn btn-quiet" type="button" data-action="clear-downloads" ${
+        !snapshot || snapshot.downloads.files === 0 || busy ? "disabled" : ""
+      }>Bersihkan</button>
+    </div>
     <p class="hint">Impor mengganti daftar situs. Folder project tidak disentuh; situs yang foldernya tidak ada dilewati, dan situs dengan PHP belum terpasang dibuat nonaktif.</p>
     ${status}`;
 }
@@ -2137,8 +2156,24 @@ function summarizeRemoval(removal: PhpRemoval): string {
   return parts.join(" ");
 }
 
-async function installDatabase(): Promise<void> {
+async function clearDownloads(): Promise<void> {
+  busy = "downloads";
   notice = null;
+  render();
+
+  try {
+    const next = await invoke<Snapshot>("clear_downloads");
+    applySnapshot(next);
+    infoNotice = "Arsip unduhan dibersihkan.";
+  } catch (err) {
+    notice = `Gagal membersihkan arsip: ${String(err)}`;
+  } finally {
+    busy = null;
+    render();
+  }
+}
+
+async function installDatabase(): Promise<void> {  notice = null;
   infoNotice = null;
   download = { target: "mariadb", version: "", received: 0, total: null, stage: "daftar" };
   render();
@@ -2394,6 +2429,9 @@ document.addEventListener("click", (event) => {
     }
     case "install-database":
       void installDatabase();
+      break;
+    case "clear-downloads":
+      void clearDownloads();
       break;
     case "start-database":
       void databaseAction("start_database");
