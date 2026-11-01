@@ -6,13 +6,13 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Added
 
-- Established English as the primary language across all repository documentation, specifications, and domain models (`GLOSSARY.md`).
-- Reworked UI frontend architecture to Vue 3 with Composition API and `<script setup>` for high modularity and low memory footprint.
-- Tauri v2 window customization with borderless window (`decorations: false`), native drag region (`data-tauri-drag-region`), and custom window controls (minimize, maximize, hide to tray).
-- Unified `AppTitlebar.vue` integrating brand identity, top-level tab navigation (Sites vs Settings), live server status badge, quick server start/stop, and collapsible terminal drawer toggle.
-- Dedicated multi-tab Settings view separating PHP runtime management, MariaDB database controls, Caddy web server routing, and Windows PATH/system toolchain configurations.
-- Sub-tabbed Site Detail panel (General info, formatted HTTP/PHP Access Logs, and quick development CLI commands).
-- Add Site Wizard modal with persistent backdrop (prevents accidental dismissal on backdrop clicks), native directory picker, and automatic framework detection.
+- Established English as the primary language across all repository documentation, specifications, and domain models (`GLOSSARY.md`). (`3f0507a`)
+- Reworked UI frontend architecture to Vue 3 with Composition API and `<script setup>` for high modularity and low memory footprint. (`3f0507a`)
+- Tauri v2 window customization with borderless window (`decorations: false`), native drag region (`data-tauri-drag-region`), and custom window controls (minimize, maximize, hide to tray). (`3f0507a`)
+- Unified `AppTitlebar.vue` integrating brand identity, top-level tab navigation (Sites vs Settings), live server status badge, quick server start/stop, and collapsible terminal drawer toggle. (`3f0507a`)
+- Dedicated multi-tab Settings view separating PHP runtime management, MariaDB database controls, Caddy web server routing, and Windows PATH/system toolchain configurations. (`3f0507a`)
+- Sub-tabbed Site Detail panel (General info, formatted HTTP/PHP Access Logs, and quick development CLI commands). (`3f0507a`)
+- Add Site Wizard modal with persistent backdrop (prevents accidental dismissal on backdrop clicks), native directory picker, and automatic framework detection. (`3f0507a`)
 - Downloaded engine archives are cached; reinstalling the same version avoids re-downloading as long as checksums match. For packages without official checksums, digests are recorded after first download. Configuration section displays archive count and byte size, with a Clean button. (`0e3e090`)
 - Local **MariaDB 11.4.13** server via Database panel in dashboard: install, start, stop, and independent autostart toggle. Version is pinned and verified with `sha256sums.txt`. (`80a23e1`)
 - Database credentials use `root` with empty password, bound exclusively to `127.0.0.1`. Passwords are saved in `runtime/mariadb/root.pass`, outside `config.json`, to prevent accidental export. (`80a23e1`)
