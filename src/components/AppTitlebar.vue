@@ -7,6 +7,7 @@ import {
   startAll,
   stopAll,
   trustCaddy,
+  openWorkspace,
   STATUS_WORD,
   type MainTab,
 } from "../store/devku";
@@ -72,6 +73,13 @@ const statusLabel = computed(() => {
   const readyCount = state.snapshot.sites.filter((s) => s.status === "ready" && s.enabled).length;
   return `${readyCount} situs aktif`;
 });
+
+const workspacePath = computed(() => state.snapshot?.workspace.path ?? "");
+const workspaceTitle = computed(() =>
+  workspacePath.value
+    ? `Buka folder workspace: ${workspacePath.value}`
+    : "Buka folder workspace",
+);
 </script>
 
 <template>
@@ -157,6 +165,20 @@ const statusLabel = computed(() => {
           @click="trustCaddy"
         >
           Percayai HTTPS
+        </button>
+
+        <!-- Workspace Shortcut -->
+        <button
+          class="btn-titlebar btn-workspace"
+          type="button"
+          :title="workspaceTitle"
+          aria-label="Buka folder workspace"
+          @click="openWorkspace()"
+        >
+          <svg class="btn-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h2.379a1.5 1.5 0 0 1 1.06.44l1.122 1.12a.5.5 0 0 0 .353.147H12.5A1.5 1.5 0 0 1 14 5.207V12.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9Z"/>
+          </svg>
+          <span class="workspace-label">Workspace</span>
         </button>
 
         <!-- Terminal Toggle -->
@@ -377,6 +399,18 @@ const statusLabel = computed(() => {
 .btn-titlebar:hover:not(:disabled) {
   background: var(--surface);
   border-color: var(--accent);
+}
+
+/* Titlebar sudah penuh di lebar minimum 780px, jadi label dilepas lebih dulu
+   dan tombolnya tetap bisa dipakai lewat ikon serta tooltip. */
+@media (max-width: 900px) {
+  .workspace-label {
+    display: none;
+  }
+
+  .btn-workspace {
+    padding: 0 6px;
+  }
 }
 
 .btn-start {

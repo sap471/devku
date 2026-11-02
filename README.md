@@ -43,7 +43,7 @@ workspace     %USERPROFILE%\DevKu\sites   project folders (content, not state)
 ```
 
 - The data root can be moved from Settings > System. DevKu copies the tree to an empty folder, leaves a small `location.json` pointer in `%APPDATA%\DevKu`, and restarts. `DEVKU_HOME` overrides everything and locks the move from the UI.
-- The workspace is the starting folder for the Add Site wizard and the Open Workspace button. It is not a site registry: projects inside it still have to be registered, and they may live anywhere.
+- The workspace is the starting folder for the Add Site wizard and the titlebar Workspace button (also in Settings). It is not a site registry: projects inside it still have to be registered, and they may live anywhere.
 - Engines stay out of the install directory on purpose, so downloading an engine never needs elevation and an update never touches your data.
 - `bun tauri dev` uses the same data root as the installed app, so a dev build reuses your engines, config, and MariaDB data. Set `DEVKU_HOME` to a separate folder when you want the two isolated.
 - Uninstalling removes only the install directory. The data root stays, because re-downloading engines costs time and bandwidth; tick the uninstaller's data checkbox to remove it. The uninstaller detaches the `bin` shim from the user PATH before deleting the binary, so no dead PATH entry is left behind.

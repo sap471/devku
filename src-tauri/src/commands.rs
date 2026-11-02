@@ -1294,7 +1294,14 @@ pub async fn open_in(
 
         match kind.as_str() {
             "data" => session.paths().root.clone(),
-            "workspace" => session.config().workspace_dir(),
+            "workspace" => {
+                // Tombol di titlebar dan Pengaturan boleh dipakai sebelum
+                // folder workspace pernah dibuat.
+                let dir = session.config().workspace_dir();
+                std::fs::create_dir_all(&dir)
+                    .map_err(|err| format!("gagal membuat {}: {err}", dir.display()))?;
+                dir
+            }
             "site" => {
                 let id = id.ok_or_else(|| "situs tidak dipilih".to_string())?;
                 let site = session
