@@ -73,8 +73,9 @@ ${StrLoc}
 
 ; Teks tambahan di halaman konfirmasi uninstall. Kotak bawaan hanya berbunyi
 ; "Delete the application data", padahal yang dihapus adalah engine dan
-; database yang tidak ikut terpasang ulang secara otomatis.
-!define DEVKU_DATA_NOTE "Config, engine, dan database DevKu ada di %APPDATA%\DevKu. Semuanya tetap disimpan kecuali kotak di atas dicentang."
+; database yang tidak ikut terpasang ulang secara otomatis. Teks ini mengikuti
+; bahasa installer bawaan (Inggris), bukan bahasa UI aplikasi.
+!define DEVKU_DATA_NOTE "Config, engines, and databases live in %APPDATA%\DevKu. They are kept unless the box above is ticked."
 
 Var PassiveMode
 Var UpdateMode
