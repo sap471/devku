@@ -125,10 +125,10 @@ fn help_text() -> &'static str {
 
 fn php_path(mode: Option<&str>) -> Result<()> {
     let paths = Paths::resolve();
-    let config = Config::load(&paths)?;
 
     match mode {
         Some("on") => {
+            let config = Config::load(&paths)?;
             let installed = PhpManager::new(paths.clone()).installed();
             let version = if installed
                 .iter()

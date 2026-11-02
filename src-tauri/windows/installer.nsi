@@ -71,6 +71,11 @@ ${StrLoc}
 !define ESTIMATEDSIZE "{{estimated_size}}"
 !define STARTMENUFOLDER "{{start_menu_folder}}"
 
+; Teks tambahan di halaman konfirmasi uninstall. Kotak bawaan hanya berbunyi
+; "Delete the application data", padahal yang dihapus adalah engine dan
+; database yang tidak ikut terpasang ulang secara otomatis.
+!define DEVKU_DATA_NOTE "Config, engine, dan database DevKu ada di %APPDATA%\DevKu. Semuanya tetap disimpan kecuali kotak di atas dicentang."
+
 Var PassiveMode
 Var UpdateMode
 Var NoShortcutMode
@@ -480,6 +485,17 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
   Pop $DeleteAppDataCheckbox
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
   SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
+
+  ; Kotak centang bawaan tidak menyebut apa yang hilang, jadi folder data
+  ; dijelaskan di bawahnya. Diletakkan setelah baris centang selesai dihitung
+  ; supaya tetap rapi di layar ber-DPI tinggi.
+  IntOp $8 $2 * 26
+  IntOp $8 $8 / 96
+  IntOp $5 $5 + $8
+  IntOp $8 $2 * 44
+  IntOp $8 $8 / 96
+  System::Call 'user32::CreateWindowEx(i 0, w "STATIC", w "${DEVKU_DATA_NOTE}", i 0, i r4, i r5, i r6, i r8, p r1, i 0, i 0, i 0) i .r9'
+  SendMessage $9 ${WM_SETFONT} $1 1
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 Function un.ConfirmLeave
@@ -825,6 +841,14 @@ Section Uninstall
   !endif
 
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
+  ; PATH pengguna masih menunjuk folder shim DevKu. Dilepas lewat perintah
+  ; yang sama dengan tombol di UI, sebelum binary dihapus, supaya menghapus
+  ; data tidak meninggalkan jalur mati. Kegagalan di sini tidak membatalkan
+  ; uninstall, karena sisa jalur bisa dibersihkan manual.
+  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" php-path off'
+  ${EndIf}
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
