@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "simple dev environment"
 authors = ["sap471"]
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/sap471/devku"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

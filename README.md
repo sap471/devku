@@ -78,3 +78,7 @@ cargo clippy --manifest-path src-tauri\Cargo.toml --all-targets
 ```
 
 Package manager: **Bun**. See [`AGENTS.md`](AGENTS.md).
+
+## License
+
+MIT, see [`LICENSE`](LICENSE). The third-party engines DevKu downloads (Caddy, Apache httpd, PHP, MariaDB, Bun, Composer) keep their own licenses and come from their original sources; DevKu does not redistribute them.

@@ -3,6 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "author": "sap471",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sap471/devku.git"
+  },
+  "homepage": "https://github.com/sap471/devku#readme",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
