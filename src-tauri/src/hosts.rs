@@ -19,8 +19,8 @@ pub fn hosts_path() -> PathBuf {
     }
 }
 
-/// `*.localhost` sudah resolve native, jadi menulis hosts hanya perlu saat user
-/// memilih TLD lain. Mengembalikan None berarti tidak ada yang perlu ditulis.
+/// `*.localhost` resolves natively, so writing hosts is only needed when the user
+/// picks another TLD. Returning None means there is nothing to write.
 pub fn plan(config: &Config) -> Option<String> {
     if config.tld == "localhost" {
         return None;
@@ -37,8 +37,8 @@ pub fn plan(config: &Config) -> Option<String> {
     Some(format!("{BEGIN}\n{body}{END}\n"))
 }
 
-/// Ganti blok DevKu saja. Entri lain di hosts tidak boleh tersentuh — file itu
-/// dipakai juga oleh blocker iklan, lisensi software, dan setelan jaringan user.
+/// Replace only the DevKu block. Other hosts entries must stay untouched: that file
+/// is also used by ad blockers, software licenses, and the user's network settings.
 pub fn merge(existing: &str, block: &str) -> String {
     let mut kept: Vec<&str> = Vec::new();
     let mut inside = false;

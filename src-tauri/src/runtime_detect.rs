@@ -24,11 +24,11 @@ impl RuntimeInfo {
     }
 }
 
-/// Urutan penting: runtime sistem menang, binary bawaan hanya cadangan. Ini yang
-/// membuat DevKu tidak menambah salinan Node atau Bun di mesin yang sudah punya.
-/// PHP juga jatuh ke folder `engines/php` kalau `php` tidak ada di PATH: versi
-/// yang sudah diunduh lewat DevKu tidak boleh tampak "tidak terdeteksi" hanya
-/// karena PATH di proses yang sudah lama hidup belum ikut berubah.
+/// Order matters: the system runtime wins, the bundled binary is a fallback only. This is what
+/// keeps DevKu from adding another Node or Bun copy on a machine that already has one.
+/// PHP also falls back to the `engines/php` folder when `php` is absent from PATH: a version
+/// already downloaded through DevKu must not look "undetected" only
+/// because the PATH of a long-lived process has not picked up the change yet.
 pub fn detect(paths: &Paths) -> Vec<RuntimeInfo> {
     let php = crate::php::PhpManager::new(paths.clone());
     let bundled_php = php.installed().last().map(|version| php.binary(version));
@@ -41,9 +41,9 @@ pub fn detect(paths: &Paths) -> Vec<RuntimeInfo> {
     ]
 }
 
-/// Composer bawaan DevKu berupa shim `.bat`, bukan binary yang bisa dijalankan
-/// langsung dengan `--version`. Versinya dibaca dari catatan pemasangan, dan
-/// shim DevKu tidak boleh dianggap sebagai Composer sistem.
+/// DevKu's bundled Composer is a `.bat` shim, not a binary that runs
+/// directly with `--version`. Its version comes from the install record, and
+/// the DevKu shim must not count as the system Composer.
 fn composer_runtime(paths: &Paths) -> RuntimeInfo {
     let managed = crate::composer::shim(paths);
 
@@ -138,8 +138,8 @@ fn version_of(name: &str, path: &PathBuf) -> Option<String> {
     Some(normalize_version(name, line))
 }
 
-/// Setiap tool menulis versinya dengan bentuk berbeda. Yang ditampilkan ke user
-/// hanya nomornya, bukan seluruh baris pembuka.
+/// Each tool prints its version in a different shape. What the user sees
+/// is only the number, not the whole opening line.
 pub fn normalize_version(name: &str, line: &str) -> String {
     let line = line.trim();
 

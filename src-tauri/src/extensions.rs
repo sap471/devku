@@ -1,6 +1,6 @@
-//! Ekstensi PHP dilihat dari dua sumber: berkas `php<name>.dll` di folder
-//! `ext/`, dan arahan `extension=` / `zend_extension=` di php.ini. Semua
-//! fungsi di sini murni bekerja pada teks supaya bisa diuji tanpa berkas.
+//! PHP extensions come from two sources: `php<name>.dll` files in the
+//! `ext/` folder, and `extension=` / `zend_extension=` directives in php.ini. Every
+//! function here works purely on text so it can be tested without files.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,9 +37,9 @@ struct Occurrence {
     active: bool,
 }
 
-/// Satu baris pada daftar ekstensi. `dll` menyatakan file php_*.dll ada di
-/// folder ext — arahan tanpa dll membiarkan php-cgi muntah, jadi UI harus
-/// melarang menyalakannya.
+/// One row in the extension list. `dll` says the php_*.dll file exists in
+/// the ext folder; a directive without the dll makes php-cgi fail, so the UI must
+/// forbid enabling it.
 #[derive(Debug, PartialEq)]
 pub struct ExtensionEntry {
     pub name: String,
@@ -48,8 +48,8 @@ pub struct ExtensionEntry {
     pub dll: bool,
 }
 
-/// Nama ekstensi yang sah untuk ditulis ke php.ini: alfanumerik plus `_-.`,
-/// tanpa spasi, tanda kutip, atau pemisah baris. Mengembalikan versi kecil.
+/// Extension names valid for writing to php.ini: alphanumeric plus `_-.`,
+/// no spaces, quotes, or line separators. Returns the lowercase form.
 pub fn normalize_name(name: &str) -> Option<String> {
     let name = name.trim().trim_end_matches(".dll");
     let name = name.strip_prefix("php_").unwrap_or(name);
@@ -66,8 +66,8 @@ pub fn normalize_name(name: &str) -> Option<String> {
     Some(name.to_ascii_lowercase())
 }
 
-/// Daftar ekstensi = gabungan dll di folder ext plus arahan yang sudah
-/// tertulis di php.ini (nama css/dll dipangkas jadi nama ekstensi biasa).
+/// Extension list = dlls in the ext folder plus directives already
+/// written in php.ini (css/dll names are trimmed to plain extension names).
 pub fn scan(ini_text: &str, dlls: BTreeSet<String>) -> Vec<ExtensionEntry> {
     let mut by_name: BTreeMap<String, Vec<Occurrence>> = BTreeMap::new();
 
@@ -95,7 +95,7 @@ pub fn scan(ini_text: &str, dlls: BTreeSet<String>) -> Vec<ExtensionEntry> {
         });
     }
 
-    // Nama yang hanya ada sebagai dll (belum disebut php.ini) tetap ikut.
+    // Names that exist only as a dll (not yet in php.ini) are still included.
     for name in dlls.iter() {
         by_name.entry(name.clone()).or_default();
     }
@@ -103,8 +103,8 @@ pub fn scan(ini_text: &str, dlls: BTreeSet<String>) -> Vec<ExtensionEntry> {
     by_name
         .into_iter()
         .map(|(name, objects)| {
-            // Vektor bisa kosong: nama itu baru ada sebagai dll, belum
-            // pernah disebut di php.ini.
+            // The vector can be empty: that name exists only as a dll and has not
+            // been mentioned in php.ini yet.
             let zend = objects
                 .last()
                 .is_some_and(|object| object.kind == Directive::ZendExtension);
@@ -118,9 +118,9 @@ pub fn scan(ini_text: &str, dlls: BTreeSet<String>) -> Vec<ExtensionEntry> {
         .collect()
 }
 
-/// Hidup/matikan satu ekstensi pada teks php.ini. Mengembalikan `None`
-/// saat tidak ada yang berubah, jadi pemanggil tidak menulis ulang file
-/// tanpa alasan.
+/// Enables/disables one extension in the php.ini text. Returns `None`
+/// when nothing changed, so the caller does not rewrite the file
+/// for nothing.
 pub fn toggle(ini_text: &str, name: &str, enable: bool) -> Result<Option<String>> {
     let Some(target) = normalize_name(name) else {
         bail!("nama ekstensi tidak sah: {name}");
@@ -167,8 +167,8 @@ pub fn toggle(ini_text: &str, name: &str, enable: bool) -> Result<Option<String>
     Ok(Some(disable_lines(&lines, &target, &found)))
 }
 
-/// Menyalakan: buka komentar pada arahan terakhir yang ada, atau tambahkan
-/// baris baru di akhir berkas, sekaligus jaga satu bendahara khusus.
+/// Enable: uncomment the last existing directive, or append
+/// a new line at the end of the file, keeping one special marker intact.
 fn enable_lines(lines: &[String], target: &str, found: &[(Directive, usize)]) -> String {
     let mut next: Vec<String> = lines.to_vec();
 
@@ -190,7 +190,7 @@ fn enable_lines(lines: &[String], target: &str, found: &[(Directive, usize)]) ->
     text
 }
 
-/// Mematikan: beri komentar semua arahan aktif. Sisanya tidak disentuh.
+/// Disable: comment out every active directive. The rest is untouched.
 fn disable_lines(lines: &[String], target: &str, found: &[(Directive, usize)]) -> String {
     let mut next: Vec<String> = lines.to_vec();
     for &(kind, index) in found {
@@ -267,7 +267,7 @@ mod tests {
         assert!(next.contains("; Dikelola DevKu."));
         assert!(next.contains("extension=gd"));
 
-        // Aman dijalankan dua kali: tidak menambah baris kedua.
+        // Safe to run twice: it does not add a second line.
         assert_eq!(toggle(&next, "gd", true).unwrap(), None);
     }
 

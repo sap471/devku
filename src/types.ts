@@ -6,9 +6,9 @@ export interface SiteView {
   domain: string;
   php: string;
   framework: string;
-  /** Apache adalah backend internal di belakang Caddy, bukan server kedua. */
+  /** Apache is an internal backend behind Caddy, not a second server. */
   backend: "caddy" | "apache";
-  /** URL publik situs, selalu tanpa port. */
+  /** Public URL of the site, never with a port. */
   url: string;
   enabled: boolean;
   path: string;
@@ -74,9 +74,9 @@ export interface PhpCatalogView {
 export interface PhpExtensionEntry {
   name: string;
   enabled: boolean;
-  /** Nilai benar berarti arahan di php.ini memakai `zend_extension=`. */
+  /** A true value means the php.ini directive uses `zend_extension=`. */
   zend: boolean;
-  /** File dll ada di folder ext; salah tanpa dll tidak bisa dinyalakan. */
+  /** The dll exists in ext/; false means it cannot be enabled without the dll. */
   available: boolean;
 }
 
@@ -84,7 +84,7 @@ export interface PhpExtensionsView {
   version: string;
   ini_path: string;
   entries: PhpExtensionEntry[];
-  /** Pool versi ini hidup: perubahan berlaku setelah dinyalakan ulang. */
+  /** The pool for this version is running: changes apply after a restart. */
   running: boolean;
 }
 
@@ -160,43 +160,43 @@ export interface Detection {
 }
 
 export interface ApacheView {
-  /** Folder instalasi Apache yang dipakai, null kalau belum dipasang. */
+  /** Apache installation folder in use, null when it is not installed yet. */
   root: string | null;
-  /** Versi folder terbaru, misalnya 2.4.69-261002. */
+  /** Newest version folder, for example 2.4.69-261002. */
   version: string | null;
   installed: boolean;
   port: number;
-  /** Status service httpd: stopped, starting, ready, backoff, failed. */
+  /** httpd service status: stopped, starting, ready, backoff, failed. */
   status: string;
   detail: string | null;
 }
 
 export interface WorkspaceView {
   path: string;
-  /** true kalau pengguna memilih sendiri, false kalau masih bawaan. */
+  /** true when the user picked it, false while it is still the default. */
   custom: boolean;
   exists: boolean;
 }
 
 export interface DataLocationView {
-  /** Folder data bawaan, tempat berkas penunjuk tinggal. */
+  /** Default data folder, where the pointer file lives. */
   default_home: string;
-  /** Penunjuk lokasi kustom, null selama data masih di folder bawaan. */
+  /** Custom location pointer, null while data still sits in the default folder. */
   pointer: string | null;
-  /** "default", "environment", "custom", atau "invalid". */
+  /** "default", "environment", "custom", or "invalid". */
   source: "default" | "environment" | "custom" | "invalid";
-  /** DEVKU_HOME mengunci lokasi, jadi UI tidak boleh menawarkan ubah. */
+  /** DEVKU_HOME locks the location, so the UI must not offer to change it. */
   locked: boolean;
 }
 
-/** Laporan pemindahan folder data. */
+/** Report of a data folder move. */
 export interface MoveReport {
   home: string;
   files: number;
   bytes: number;
 }
 
-/** Kemajuan penyalinan folder data, dikirim selama pemindahan berjalan. */
+/** Progress of the data folder copy, sent while the move runs. */
 export interface MoveProgress {
   done: number;
   total: number;
@@ -218,9 +218,9 @@ export interface Snapshot {
   composer_global: ComposerGlobal;
   config_path: string;
   home_path: string;
-  /** Folder induk project, dipakai wizard dan tombol buka folder. */
+  /** Parent folder for projects, used by the wizard and the open folder button. */
   workspace: WorkspaceView;
-  /** Asal folder data, untuk menjelaskan dari mana nilainya datang. */
+  /** Origin of the data folder, to explain where the value came from. */
   data_location: DataLocationView;
   start_at_login: boolean;
   sites: SiteView[];

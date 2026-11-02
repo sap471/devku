@@ -157,8 +157,8 @@ async function onBackendChange(event: Event) {
   if (backend === site.value.backend) return;
 
   await setSiteBackend(site.value.id, backend);
-  // Penolakan backend (misalnya Apache belum dipasang) tidak mengubah
-  // snapshot, jadi select dikembalikan ke nilai yang benar-benar tersimpan.
+  // A backend rejection (Apache not installed, for example) does not change the
+  // snapshot, so the select goes back to the value actually stored.
   if (site.value.backend !== backend) {
     select.value = site.value.backend;
   }
@@ -189,8 +189,8 @@ function refreshCurrentLog() {
   }
 }
 
-// Live: polling tail_log tiap 2 detik selama toggle hidup dan sub-tab Log
-// terbuka. Pindah situs ikut saja karena polling membaca situs aktif terkini.
+// Live: poll tail_log every 2 seconds while the toggle is on and the Log sub-tab
+// is open. Switching sites just follows along because polling reads the current site.
 const liveLog = ref(false);
 let liveTimer: number | null = null;
 let liveBusy = false;
@@ -557,7 +557,7 @@ async function copyVisibleLogs() {
               {{ copySuccess ? 'Tersalin!' : 'Salin' }}
             </button>
 
-            <!-- Live toggle: polling log otomatis, tanpa klik Segarkan -->
+            <!-- Live toggle: automatic log polling, no need to click Segarkan -->
             <button
               class="btn-tool"
               :class="{ 'tool-active': liveLog }"

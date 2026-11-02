@@ -9,8 +9,8 @@ use crate::config::{Backend, Config};
 use crate::paths::{Paths, write_atomic};
 use crate::proc::ServiceSpec;
 
-/// Core tidak tahu backend mana yang dipakai. Semua yang dibutuhkan untuk
-/// menjalankan sebuah situs lewat interface ini.
+/// Core does not know which backend is in use. Everything needed to run a
+/// site goes through this interface.
 #[async_trait]
 pub trait WebServerBackend: Send + Sync {
     fn name(&self) -> &'static str;
@@ -37,7 +37,7 @@ impl CaddyBackend {
         self.binary().exists()
     }
 
-    /// Dipakai Fase 2 saat unduhan selesai: taruh binary di `engines/caddy`.
+    /// Used by Phase 2 when the download finishes: place the binary in `engines/caddy`.
     pub fn install_binary(&self, source: &Path) -> Result<PathBuf> {
         let target = self.binary();
         std::fs::create_dir_all(self.paths.caddy_dir())?;
@@ -55,9 +55,9 @@ impl CaddyBackend {
         Ok(target)
     }
 
-    /// Caddy memvalidasi sebelum benar-benar dijalankan. Dipakai saat belum ada
-    /// instance hidup: lebih baik satu pesan galat jelas daripada proses yang
-    /// gagal start lalu diulang supervisor lima kali.
+    /// Caddy validates before actually running. Used when no live instance
+    /// exists: one clear error message beats a process that fails to start and
+    /// is retried five times by the supervisor.
     pub async fn validate(&self, caddyfile: &str) -> Result<()> {
         if !self.is_installed() {
             bail!(
@@ -91,8 +91,8 @@ impl CaddyBackend {
         bail!("{}", extract_caddy_error(&output.stderr, &output.stdout))
     }
 
-    /// Render, validasi, baru tulis. Urutan ini mencegah file di disk berisi
-    /// config yang ditolak, yang akan menggagalkan start berikutnya juga.
+    /// Render, validate, then write. This order keeps rejected config off disk,
+    /// which would otherwise break the next start too.
     pub async fn write_config(
         &self,
         config: &Config,
@@ -105,8 +105,8 @@ impl CaddyBackend {
         Ok(caddyfile)
     }
 
-    /// Halaman yang dilayani di port 80 untuk `localhost` dan host yang tidak
-    /// dikenal. Ditulis ulang setiap config berubah, jadi isinya tidak basi.
+    /// The page served on port 80 for `localhost` and unknown hosts. Rewritten
+    /// whenever the config changes, so its content never goes stale.
     pub fn write_dashboard(&self, config: &Config) -> Result<()> {
         let dir = self.paths.dashboard_dir();
         std::fs::create_dir_all(&dir)?;
@@ -124,12 +124,12 @@ impl WebServerBackend for CaddyBackend {
     fn render(&self, config: &Config, php_ports: &BTreeMap<String, u16>) -> Result<String> {
         let sites: Vec<_> = config.served_sites().collect();
 
-        // skip_install_trust: tanpa ini Caddy memasang CA ke trust store saat
-        // startup dan di Windows itu memunculkan dialog "Security Warning"
-        // yang menggantung server sampai diklik. Pemasangan jadi lewat tombol
-        // Percayai / `devku trust` yang non-interaktif. auto_https dibiarkan
-        // menyala: auto_https off menggagalkan pembuatan cert internal; label
-        // http:///https:// eksplisit per situs sudah mencegah redirect.
+        // skip_install_trust: without it Caddy installs its CA into the trust
+        // store at startup, and on Windows that raises a "Security Warning"
+        // dialog that blocks the server until clicked. Installation therefore
+        // goes through the non-interactive Percayai button / `devku trust`. auto_https
+        // stays on: auto_https off breaks internal cert creation; explicit
+        // http:///https:// labels per site already prevent redirects.
         let mut out = String::from("{\n\tadmin localhost:2019\n\tskip_install_trust\n}\n");
 
         for site in sites {
@@ -147,8 +147,8 @@ impl WebServerBackend for CaddyBackend {
             let log = quote(&self.paths.logs().join(format!("{}.log", site.id)));
 
             match config.backend_of(site) {
-                // Satu-satunya pintu masuk tetap Caddy di 80/443. httpd hidup
-                // di loopback dan tidak pernah dibuka langsung ke luar.
+                // Caddy on 80/443 remains the only entry point. httpd lives on
+                // loopback and is never exposed directly.
                 Backend::Apache => {
                     let apache = config.apache.port;
                     out.push_str(&format!(
@@ -190,8 +190,8 @@ impl WebServerBackend for CaddyBackend {
             }
         }
 
-        // Dasbor selalu ada, jadi port 80 tidak pernah kosong dan salah ketik
-        // domain mendarat di halaman yang menjelaskan keadaannya.
+        // The dashboard always exists, so port 80 is never empty and a mistyped
+        // domain lands on a page that explains the situation.
         let dashboard = quote(&self.paths.dashboard_dir());
         out.push_str(&format!(
             "\nhttp://localhost, https://localhost, http://127.0.0.1 {{\n\
@@ -245,9 +245,9 @@ impl WebServerBackend for CaddyBackend {
     async fn reload(&self, config: &Config, php_ports: &BTreeMap<String, u16>) -> Result<u16> {
         let caddyfile = self.render(config, php_ports)?;
 
-        // Instance yang hidup sudah memvalidasi sendiri saat /load: kalau
-        // ditolak, config lama tetap berjalan. Jadi tidak perlu `caddy validate`
-        // terpisah di jalur ini, cukup jangan simpan file yang ditolak.
+        // A live instance validates on /load itself: if rejected, the old config
+        // keeps running. So no separate `caddy validate` is needed on this path,
+        // just never save a rejected file.
         let (status, body) = api::post_caddyfile(&caddyfile).await?;
         if status >= 400 {
             bail!("Caddy menolak config: {}", extract_load_error(&body));
@@ -264,9 +264,9 @@ impl WebServerBackend for CaddyBackend {
 }
 
 impl CaddyBackend {
-    /// Sampaikan ke Caddy agar memasang CA lokalnya ke trust store Windows.
-    /// Butuh admin API Caddy yang hidup, jadi dipanggil hanya saat service
-    /// jalan. Tanpa hak admin pun lulus: Caddy menulis ke `CurrentUser\Root`.
+    /// Tells Caddy to install its local CA into the Windows trust store.
+    /// Needs the admin API of a live Caddy, so it is called only while the
+    /// service runs. It succeeds without admin rights: Caddy writes to `CurrentUser\Root`.
     pub async fn trust(&self) -> Result<&'static str> {
         if !self.is_installed() {
             bail!("Caddy belum terpasang di {}", self.binary().display());
@@ -296,8 +296,8 @@ impl CaddyBackend {
     }
 }
 
-/// Bedakan dua hasil yang sama-sama berhasil: cert memang sudah terpasang,
-/// atau baru saja dipasang. Yurinya dipakai UI.
+/// Distinguishes two equally successful outcomes: the cert was already
+/// installed, or was just installed. The UI uses that distinction.
 fn classify_trust(text: &str) -> &'static str {
     if text.contains("already trusted by system") {
         "sudah"
@@ -308,8 +308,8 @@ fn classify_trust(text: &str) -> &'static str {
     }
 }
 
-/// Caddy menulis log JSON ke stderr; ambil hanya baris level error supaya UI
-/// tidak menampilkan deretan info startup.
+/// Caddy writes JSON logs to stderr; keep only error level lines so the UI
+/// does not show a wall of startup info.
 fn extract_caddy_error(stderr: &[u8], stdout: &[u8]) -> String {
     let mut messages = Vec::new();
 
@@ -427,7 +427,7 @@ fn html_escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Caddyfile memakai spasi sebagai pemisah, jadi path dengan spasi harus dikutip.
+/// The Caddyfile uses spaces as separators, so paths with spaces must be quoted.
 fn quote(path: &Path) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
     format!("\"{text}\"")
@@ -679,7 +679,7 @@ mod tests {
         assert_eq!(extract_load_error(""), "tanpa pesan");
     }
 
-    /// Butuh binary Caddy nyata. Jalankan dengan:
+    /// Needs a real Caddy binary. Run with:
     /// `$env:DEVKU_CADDY_BIN="...caddy.exe"; cargo test --lib -- --ignored`
     #[tokio::test]
     #[ignore = "butuh binary Caddy lewat DEVKU_CADDY_BIN"]

@@ -16,8 +16,8 @@ use process_wrap::tokio::ProcessGroup;
 #[cfg(windows)]
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
-/// Batas restart dalam satu jendela waktu. Lewat dari ini, proses dianggap
-/// gagal permanen — lebih baik berhenti dan lapor daripada berputar selamanya.
+/// Restart limit within one time window. Past this, the process counts as
+/// a permanent failure: better to stop and report than to spin forever.
 const MAX_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
@@ -40,7 +40,7 @@ pub enum ServiceState {
 }
 
 impl ServiceState {
-    /// Label stabil untuk UI; jangan ikut berubah saat pesan diubah.
+    /// Stable label for the UI; must not change when the message changes.
     pub fn tag(&self) -> &'static str {
         match self {
             ServiceState::Starting => "starting",
@@ -88,7 +88,7 @@ pub struct ServiceSpec {
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
     pub cwd: Option<PathBuf>,
-    /// Kalau diisi, service dianggap siap saat port ini menerima koneksi.
+    /// When set, the service counts as ready once this port accepts a connection.
     pub port: Option<u16>,
     pub log_dir: PathBuf,
 }
@@ -126,8 +126,8 @@ impl Supervisor {
         self.state.read().await.clone()
     }
 
-    /// Menunggu service siap. Mengembalikan alasan terakhir kalau gagal, supaya
-    /// pemanggil tidak cuma melihat "starting" tanpa konteks.
+    /// Waits for the service to become ready. Returns the last reason on failure, so
+    /// the caller does not just see "starting" without context.
     pub async fn wait_ready(&self, timeout: Duration) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
         let mut last = String::from("starting");
@@ -160,8 +160,8 @@ impl Supervisor {
 
 impl Drop for Supervisor {
     fn drop(&mut self) {
-        // Anak proses juga dibunuh oleh KillOnDrop; sinyal ini hanya mempercepat
-        // loop supaya tidak sempat spawn ulang saat shutdown.
+        // Child processes are killed by KillOnDrop too; this signal only speeds up
+        // the loop so it cannot respawn during shutdown.
         let _ = self.stop_tx.send(true);
     }
 }
@@ -310,8 +310,8 @@ fn spawn_once(spec: &ServiceSpec) -> Result<Box<dyn ChildWrapper>> {
         cmd.stderr(std::process::Stdio::from(err));
     });
 
-    // Windows: Job Object dengan kill-on-close mencegah php-cgi jadi yatim
-    // kalau devku sendiri mati. Unix: process group supaya sinyal menjangkau anak.
+    // Windows: a Job Object with kill-on-close stops php-cgi from being orphaned
+    // when devku itself dies. Unix: a process group so the signal reaches children.
     #[cfg(windows)]
     {
         wrap.wrap(CreationFlags(CREATE_NO_WINDOW));
@@ -330,8 +330,8 @@ fn spawn_once(spec: &ServiceSpec) -> Result<Box<dyn ChildWrapper>> {
 }
 
 async fn stop_child(child: &mut Box<dyn ChildWrapper>) {
-    // kill() mengembalikan Box<dyn Future> yang tidak Unpin; Box::into_pin
-    // membuatnya bisa di-await tanpa menambah dependency.
+    // kill() returns a Box<dyn Future> that is not Unpin; Box::into_pin
+    // makes it awaitable without adding a dependency.
     let _ = Box::into_pin(child.kill()).await;
 }
 

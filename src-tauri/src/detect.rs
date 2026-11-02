@@ -1,17 +1,17 @@
 use std::path::{Path, PathBuf};
 
-/// Hasil pemindaian folder project. `framework` sengaja berupa string pendek
-/// supaya bisa disimpan di config dan ditampilkan apa adanya.
+/// Result of scanning a project folder. `framework` is deliberately a short string
+/// so it can be stored in config and shown as-is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Detection {
     pub framework: &'static str,
     pub document_root: PathBuf,
-    /// Folder yang dipilih user, dipakai UI untuk menampilkan apa yang dibaca.
+    /// Folder the user picked, used by the UI to show what was read.
     pub project_root: PathBuf,
 }
 
-/// Cari tanda framework dari isi folder. Urutan penting: Laravel dan CI4
-/// menang atas deteksi generik karena `public/index.php` juga ada di sana.
+/// Find framework markers from the folder contents. Order matters: Laravel and CI4
+/// win over generic detection because `public/index.php` is there too.
 pub fn detect(path: &Path) -> Option<Detection> {
     if !path.is_dir() {
         return None;
@@ -71,7 +71,7 @@ fn public_or(path: &Path) -> PathBuf {
     }
 }
 
-/// Label yang ditampilkan ke user. Jangan mengarang nama yang lebih keren.
+/// Label shown to the user. Do not invent a fancier name.
 pub fn label(framework: &str) -> &str {
     match framework {
         "laravel" => "Laravel",

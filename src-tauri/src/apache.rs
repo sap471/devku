@@ -1,8 +1,8 @@
-//! Backend Apache internal. Caddy tetap menjadi satu-satunya pintu masuk di
-//! port 80/443 dan meneruskan situs ber-backend Apache ke httpd di loopback.
-//! Jadi semua akses, termasuk HTTPS, tetap lewat domain tanpa port; port
-//! Apache tidak pernah dibuka ke luar. PHP tetap dijalankan pool php-cgi yang
-//! sama, jadi satu versi PHP tidak butuh proses tambahan per backend.
+//! Internal Apache backend. Caddy remains the single entry point on
+//! port 80/443 and forwards Apache-backed sites to httpd on loopback.
+//! So all access, including HTTPS, still goes through the domain without a port; the
+//! Apache port is never exposed externally. PHP still runs through the same php-cgi
+//! pool, so one PHP version needs no extra process per backend.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,8 +13,8 @@ use crate::config::{Config, Site};
 use crate::paths::{Paths, write_atomic};
 use crate::proc::ServiceSpec;
 
-/// Modul yang wajib ada, pasangan nama modul dan berkasnya. `mpm_winnt` tidak
-/// ada di daftar karena Apache Windows mengompilasinya langsung ke httpd.exe.
+/// Required modules as module-name and file pairs. `mpm_winnt` is not
+/// listed because Windows Apache compiles it directly into httpd.exe.
 const MODULES: &[(&str, &str)] = &[
     ("authz_core_module", "mod_authz_core.so"),
     ("authz_host_module", "mod_authz_host.so"),
@@ -30,7 +30,7 @@ const MODULES: &[(&str, &str)] = &[
 
 pub const BINARY: &str = "httpd.exe";
 
-/// Satu instalasi Apache di `engines/apache/<versi>`.
+/// One Apache installation at `engines/apache/<version>`.
 pub struct ApacheBackend {
     paths: Paths,
     root: Option<PathBuf>,
@@ -38,8 +38,8 @@ pub struct ApacheBackend {
 }
 
 impl ApacheBackend {
-    /// Memakai instalasi terbaru yang ada di `engines/apache`. Tidak ada folder
-    /// pilihan user: pemasangan dan pemilihan versi ditangani DevKu sendiri.
+    /// Uses the newest installation present in `engines/apache`. There is no
+    /// user-selectable folder: DevKu handles installation and version choice itself.
     pub fn new(paths: Paths, port: u16) -> Self {
         let root = installed_roots(&paths).pop().map(|(_, root)| root);
         Self { paths, root, port }
@@ -53,8 +53,8 @@ impl ApacheBackend {
         self.root.as_deref()
     }
 
-    /// Nama folder versi di `engines/apache`, bukan nama folder di dalamnya
-    /// (`Apache24` untuk zip Apache Lounge).
+    /// Version folder name under `engines/apache`, not the folder name inside it
+    /// (`Apache24` for the Apache Lounge zip).
     pub fn version(&self) -> Option<String> {
         let root = self.root.as_ref()?;
         let relative = root.strip_prefix(self.paths.apache_dir()).ok()?;
@@ -72,7 +72,7 @@ impl ApacheBackend {
         self.paths.apache_config()
     }
 
-    /// Siap dipakai: httpd.exe ada dan modul FastCGI lengkap.
+    /// Ready to use: httpd.exe exists and the FastCGI modules are complete.
     pub fn is_installed(&self) -> bool {
         self.check().is_ok()
     }
@@ -96,7 +96,7 @@ impl ApacheBackend {
         Ok(())
     }
 
-    /// Site Apache beserta port pool PHP-nya.
+    /// An Apache site with its PHP pool port.
     fn served<'a>(
         &self,
         config: &'a Config,
@@ -118,7 +118,7 @@ impl ApacheBackend {
         Ok(out)
     }
 
-    /// httpd.conf lengkap: satu vhost per site ber-backend Apache.
+    /// Full httpd.conf: one vhost per Apache-backed site.
     pub fn render(&self, config: &Config, php_ports: &BTreeMap<String, u16>) -> Result<String> {
         self.check()?;
         let root = self.root.as_ref().expect("check memastikan root ada");
@@ -140,8 +140,8 @@ impl ApacheBackend {
              DirectoryIndex index.php index.html\n"
         ));
 
-        // mime.types ikut distribusi standar Apache. Kalau tidak ada, lebih
-        // baik tanpa pemetaan tipe daripada httpd menolak start.
+        // mime.types ships with the standard Apache distribution. Without it,
+        // running with no type mapping beats httpd refusing to start.
         let mime = self
             .root
             .as_ref()
@@ -194,16 +194,16 @@ impl ApacheBackend {
         Ok(out)
     }
 
-    /// Tulis config lalu kembalikan isinya, supaya pemanggil bisa membandingkan
-    /// dengan config yang sedang dipakai Apache dan menghindari restart.
+    /// Writes the config and returns its contents so the caller can compare it
+    /// with the config Apache is currently using and avoid a restart.
     pub fn write_config(
         &self,
         config: &Config,
         php_ports: &BTreeMap<String, u16>,
     ) -> Result<String> {
         let text = self.render(config, php_ports)?;
-        // Apache menolak start kalau folder log belum ada, dan folder runtime
-        // bisa kosong pada pemakaian pertama.
+        // Apache refuses to start when the log folder is missing, and the runtime
+        // folder can be empty on first use.
         std::fs::create_dir_all(self.paths.logs())?;
         write_atomic(&self.config_path(), &text)?;
         Ok(text)
@@ -221,8 +221,8 @@ impl ApacheBackend {
                 self.config_path().to_string_lossy().to_string(),
             ],
             env: Vec::new(),
-            // cwd di bin supaya DLL Apache (libapr, libhttpd) ditemukan tanpa
-            // mengubah PATH milik proses DevKu.
+            // cwd is bin so the Apache DLLs (libapr, libhttpd) are found without
+            // changing the PATH of the DevKu process.
             cwd: Some(root.join("bin")),
             port: Some(self.port),
             log_dir: self.paths.logs(),
@@ -234,8 +234,8 @@ fn slash(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-/// True kalau folder ini (atau satu subfolder pembungkusnya) berisi
-/// `bin/httpd.exe`. Zip Apache Lounge menaruh semuanya di `Apache24/`.
+/// True when this folder (or one wrapper subfolder inside it) contains
+/// `bin/httpd.exe`. The Apache Lounge zip puts everything under `Apache24/`.
 pub fn has_httpd(dir: &Path) -> bool {
     discover_root(dir).is_some()
 }
@@ -254,8 +254,8 @@ fn discover_root(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Instalasi yang bisa dipakai, urut naik seperti PHP: yang terakhir selalu
-/// terbaru. Nama folder dipakai sebagai versi karena itu yang ditampilkan UI.
+/// Usable installations, ascending like PHP: the last entry is always
+/// the newest. The folder name is the version because the UI displays it.
 pub fn installed_roots(paths: &Paths) -> Vec<(String, PathBuf)> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(paths.apache_dir()) {
@@ -276,7 +276,7 @@ pub fn installed_roots(paths: &Paths) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// Versi terpasang, urut naik.
+/// Installed versions, ascending.
 pub fn installed(paths: &Paths) -> Vec<String> {
     installed_roots(paths)
         .into_iter()
@@ -396,7 +396,7 @@ mod tests {
         let paths = temp_paths("installed");
         let base = paths.apache_dir();
         apache_root(&base.join("2.4.62-240904"));
-        // Zip Apache Lounge membungkus isinya di Apache24/.
+        // The Apache Lounge zip wraps its contents in Apache24/.
         apache_root(&base.join("2.4.69-261002").join("Apache24"));
 
         assert_eq!(installed(&paths), vec!["2.4.62-240904", "2.4.69-261002"]);
@@ -406,13 +406,13 @@ mod tests {
         assert!(backend.root().unwrap().ends_with("Apache24"));
     }
 
-    /// Membuktikan config hasil render benar-benar diterima httpd dan PHP
-    /// dieksekusi lewat pool yang sudah berjalan. Tidak dijalankan default
-    /// karena butuh Apache lokal dan pool php-cgi.
+    /// Proves the rendered config is actually accepted by httpd and that PHP
+    /// is executed through an already running pool. Not run by default
+    /// because it needs a local Apache and a php-cgi pool.
     ///
     /// `DEVKU_APACHE_ROOT=... DEVKU_PHP_PORT=9011 cargo test e2e_rendered -- --ignored`
     #[test]
-    #[ignore = "butuh Apache lokal dan pool php-cgi yang sudah berjalan"]
+    #[ignore = "needs a local Apache and a running php-cgi pool"]
     fn e2e_rendered_config_serves_php() {
         use std::io::{Read, Write};
         use std::net::TcpStream;
@@ -435,8 +435,8 @@ mod tests {
             "<?php echo 'e2e-ok ', PHP_VERSION;",
         )
         .unwrap();
-        // Permalink ala WordPress: path yang bukan berkas diarahkan ke
-        // index.php. SCRIPT_FILENAME harus tetap menunjuk berkas hasil rewrite.
+        // WordPress-style permalinks: paths that are not files are directed to
+        // index.php. SCRIPT_FILENAME must still point at the rewritten file.
         std::fs::write(
             docroot.join(".htaccess"),
             "RewriteEngine On\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteRule ^ index.php [L]\n",

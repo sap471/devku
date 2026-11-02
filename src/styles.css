@@ -196,7 +196,7 @@ body {
 .shell {
   flex: 1 1 auto;
   display: grid;
-  /* Daftar situs tetap sempit; ruang tambahan dipakai panel info di kanan. */
+  /* The site list stays narrow; the extra room goes to the info panel on the right. */
   grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
   min-height: 0;
 }

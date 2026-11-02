@@ -162,7 +162,7 @@ function applySnapshot(next: Snapshot): void {
     state.selectedSiteId = null;
   }
 
-  // Ekstensi ikut versi PHP. Versi yang dihapus tidak boleh masih terpilih.
+  // Extensions follow the PHP version. A deleted version must not stay selected.
   if (state.phpExtensionsVersion && !next.installed_php.includes(state.phpExtensionsVersion)) {
     state.phpExtensionsVersion = "";
     state.phpExtensions = null;
@@ -364,7 +364,7 @@ export async function setApachePort(port: number): Promise<void> {
   }
 }
 
-/// Workspace hanya menentukan folder awal, jadi tidak perlu service restart.
+/// The workspace only sets the starting folder, so no service restart is needed.
 export async function setWorkspace(path: string | null): Promise<void> {
   state.busy = "workspace";
   state.notice = null;
@@ -395,8 +395,8 @@ export async function openDataRoot(): Promise<void> {
   }
 }
 
-/// Memindahkan folder data. Service berhenti, penyalinan berjalan dengan
-/// progres, lalu aplikasi dimulai ulang supaya semua jalur ikut pindah.
+/// Moves the data folder. Services stop, the copy runs with
+/// progress, then the app restarts so every path moves with it.
 export async function moveDataHome(path: string): Promise<void> {
   state.busy = "move-data";
   state.notice = null;

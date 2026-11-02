@@ -1,6 +1,6 @@
-/// Satu dialog untuk semua aksi yang butuh perhatian: konfirmasi hapus, input
-/// password, ceklis backup. Isinya disusun dari data, bukan HTML bebas dari
-/// pemanggil, supaya tidak ada jalan menyisipkan markup tanpa escape.
+/// One dialog for every action that needs attention: delete confirmation, password
+/// input, backup checks. Its content is built from data, not free HTML from the
+/// caller, so there is no way to inject markup without escaping.
 
 export interface DialogChoice {
   id: string;
@@ -13,7 +13,7 @@ export interface DialogCheckbox {
   label: string;
   hint?: string;
   checked?: boolean;
-  /// Ceklis hanya tampil kalau ceklis lain sudah dicentang.
+  /// A checkbox shows only when the other checkbox is already ticked.
   requires?: string;
 }
 
@@ -39,7 +39,7 @@ export interface DialogSpec {
   fields?: DialogField[];
   checkboxes?: DialogCheckbox[];
   choices: DialogChoice[];
-  /// Menandai dialog yang menghapus atau mengubah data.
+  /// Marks a dialog that deletes or mutates data.
   tone?: "warning" | "danger";
   cancelLabel?: string;
 }
@@ -59,8 +59,8 @@ const esc = (value: string) =>
 
 let nextId = 0;
 
-/// Membuka dialog dan menunggu satu pilihan. `null` berarti dibatalkan lewat
-/// Escape, klik latar, atau tombol batal.
+/// Opens the dialog and waits for one choice. `null` means it was cancelled via
+/// Escape, a click on the backdrop, or the cancel button.
 export function openDialog(spec: DialogSpec): Promise<DialogOutcome | null> {
   return new Promise((resolve) => {
     const uid = `dialog-${++nextId}`;
@@ -170,8 +170,8 @@ export function openDialog(spec: DialogSpec): Promise<DialogOutcome | null> {
         const own = row.querySelector<HTMLInputElement>("[data-check]");
         const hidden = !gate?.checked;
         row.hidden = hidden;
-        // Ceklis bertingkat kembali ke keadaan awalnya saat induknya dicentang
-        // lagi, bukan tetap mati karena sempat disembunyikan.
+        // Nested checkboxes return to their initial state when the parent is ticked
+        // again, instead of staying off because they were hidden.
         if (own && own !== gate) {
           own.checked = hidden ? false : own.dataset.default === "true";
         }

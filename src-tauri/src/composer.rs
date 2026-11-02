@@ -12,8 +12,8 @@ const LATEST_URL: &str = "https://getcomposer.org/download/latest-stable/compose
 const CHECKSUM_URL: &str = "https://getcomposer.org/download/latest-stable/composer.phar.sha256sum";
 const PHAR: &str = "composer.phar";
 
-/// PHP yang dipakai Composer. `source` hanya untuk menjelaskan asal pilihan,
-/// bukan memengaruhi cara shim bekerja.
+/// PHP used by Composer. `source` only explains where the choice came from,
+/// it does not affect how the shim works.
 #[derive(Clone, Debug)]
 pub struct PhpChoice {
     pub path: PathBuf,
@@ -24,7 +24,7 @@ pub struct PhpChoice {
 pub struct Status {
     pub installed: bool,
     pub version: Option<String>,
-    /// PHP yang akan dipakai shim sekarang, bukan yang tercatat saat pasang.
+    /// PHP the shim will use now, not the one recorded at install time.
     pub php: Option<PhpChoice>,
     pub php_missing: bool,
 }
@@ -53,9 +53,9 @@ pub fn shim(paths: &Paths) -> PathBuf {
     })
 }
 
-/// Folder yang dipakai Composer untuk paket global. Di Windows defaultnya
-/// `%APPDATA%\Composer\vendor\bin`, tempat `laravel.bat` dan tool global lain
-/// dipasang.
+/// Folder Composer uses for global packages. On Windows it defaults to
+/// `%APPDATA%\Composer\vendor\bin`, where `laravel.bat` and other global tools
+/// are installed.
 pub fn global_bin_dir() -> PathBuf {
     if let Some(dir) = env_path("COMPOSER_BIN_DIR") {
         return dir;
@@ -90,8 +90,8 @@ fn env_path(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Composer menyimpan `bin-dir` di config global. Nilai relatif dihitung dari
-/// COMPOSER_HOME, sama seperti yang dilakukan Composer sendiri.
+/// Composer stores `bin-dir` in its global config. A relative value is resolved from
+/// COMPOSER_HOME, the same way Composer itself does.
 fn configured_bin_dir(home: &Path) -> Option<PathBuf> {
     let text = std::fs::read_to_string(home.join("config.json")).ok()?;
     let root: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -113,7 +113,7 @@ pub struct GlobalStatus {
     pub dir: String,
     pub registered: bool,
     pub exists: bool,
-    /// Nama tool tanpa ekstensi, mis. `laravel` dan `carbon`.
+    /// Tool name without extension, e.g. `laravel` and `carbon`.
     pub tools: Vec<String>,
 }
 
@@ -162,9 +162,9 @@ pub fn status(paths: &Paths) -> Status {
     }
 }
 
-/// PHP untuk memasang Composer. PATH menang, lalu shim PHP DevKu, lalu versi
-/// bawaan terbaru. Urutan ini yang membuat mesin dengan PHP sendiri tidak
-/// dipaksa memakai PHP unduhan DevKu.
+/// PHP used to install Composer. PATH wins, then the DevKu PHP shim, then the
+/// newest bundled version. This order keeps a machine that already has its own PHP
+/// from being forced onto the PHP downloaded by DevKu.
 pub fn php_for_composer(paths: &Paths) -> Option<PhpChoice> {
     if let Some(path) = php_in_path() {
         return Some(PhpChoice {
@@ -192,9 +192,9 @@ pub fn php_for_composer(paths: &Paths) -> Option<PhpChoice> {
     })
 }
 
-/// PHP yang benar-benar dipakai shim sekarang: `php` di PATH kalau ada, kalau
-/// tidak jalur yang tercatat saat pemasangan. Versi bawaan terbaru tidak ikut
-/// dihitung karena shim tidak mencarinya sendiri.
+/// PHP the shim actually uses now: `php` on PATH if present, otherwise
+/// the path recorded at install time. The newest bundled version is not
+/// considered because the shim does not look it up itself.
 fn runtime_php(paths: &Paths) -> Option<PhpChoice> {
     if let Some(path) = php_in_path() {
         return Some(PhpChoice {
@@ -234,9 +234,9 @@ pub struct Installed {
     pub php: PhpChoice,
 }
 
-/// Unduh, verifikasi, uji jalan dengan PHP terpilih, lalu pasang shim. Phar
-/// hanya dipindahkan ke `engines/composer` setelah PHP benar-benar bisa
-/// menjalankannya, jadi kegagalan tidak meninggalkan Composer setengah jadi.
+/// Downloads, verifies, test-runs with the chosen PHP, then installs the shim. The phar
+/// is only moved into `engines/composer` once PHP can actually
+/// run it, so a failure does not leave Composer half installed.
 pub async fn install(
     paths: &Paths,
     cancel: &AtomicBool,
@@ -357,9 +357,9 @@ fn first_line(text: &str) -> Option<&str> {
     text.lines().map(str::trim).find(|line| !line.is_empty())
 }
 
-/// Shim sengaja memanggil `php` dari PATH lebih dulu. Kalau PATH tidak punya
-/// PHP, jalur yang dipilih saat pemasangan dipakai supaya Composer tetap jalan
-/// di terminal DevKu.
+/// The shim deliberately calls `php` from PATH first. If PATH has no
+/// PHP, the path chosen at install time is used so Composer still runs
+/// in the DevKu terminal.
 fn shim_script(php: &Path, phar: &Path) -> String {
     if cfg!(windows) {
         format!(
@@ -388,8 +388,8 @@ fn shim_script(php: &Path, phar: &Path) -> String {
     }
 }
 
-/// Menunjuk Composer ke PHP lain tanpa memasang ulang, dipakai saat versi yang
-/// tercatat dihapus. Phar tetap, hanya penunjuk dan shim yang ditulis ulang.
+/// Points Composer at another PHP without reinstalling, used when the
+/// recorded version is deleted. The phar stays; only the pointer and shim are rewritten.
 pub fn set_php(paths: &Paths, php: &Path) -> Result<()> {
     if !php.exists() {
         bail!("PHP {} tidak ada", php.display());

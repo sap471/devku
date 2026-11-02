@@ -3,9 +3,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const ADMIN_PORT: u16 = 2019;
 
-/// Caddy admin API hanya bicara HTTP polos di loopback, jadi tidak perlu
-/// klien HTTP penuh — cukup satu request dan baca status line + body.
-/// Body ikut dikembalikan karena Caddy menaruh alasan penolakan di sana.
+/// The Caddy admin API only speaks plain HTTP on loopback, so there is no need for
+/// a full HTTP client: one request plus reading the status line and body is enough.
+/// The body is returned too because Caddy puts the rejection reason there.
 pub async fn post_caddyfile(caddyfile: &str) -> Result<(u16, String)> {
     let body = caddyfile.as_bytes();
     let request = format!(

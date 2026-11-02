@@ -31,8 +31,8 @@ tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macr
 process-wrap = { version = "10", features = ["tokio1"] }
 portable-pty = "0.9"
 zip = { version = "9", default-features = false, features = ["deflate"] }
-# Hanya untuk mengunduh PHP/Caddy. Di Windows native-tls memakai schannel
-# bawaan sistem, jadi tidak ada OpenSSL atau rustls yang ikut dikompilasi.
+# Only for downloading PHP/Caddy. On Windows native-tls uses the system
+# schannel, so no OpenSSL or rustls gets compiled in.
 reqwest = { version = "0.13", default-features = false, features = ["stream", "native-tls"] }
 sha2 = "0.10"
 winreg = "0.56"

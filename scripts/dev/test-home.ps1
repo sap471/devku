@@ -52,7 +52,7 @@ function Get-SizeMb([string]$Path) {
     return [math]::Round($bytes / 1MB, 1)
 }
 
-# Menyusun pohon folder di tujuan lalu membuat satu hardlink per berkas.
+# Builds the folder tree at the destination, then makes one hardlink per file.
 function Copy-TreeAsLinks([string]$Source, [string]$Destination) {
     if (-not (Test-Path -LiteralPath $Source)) { return 0 }
 
@@ -75,7 +75,7 @@ function Copy-TreeAsLinks([string]$Source, [string]$Destination) {
             New-Item -ItemType Directory -Force -Path $parent | Out-Null
         }
 
-        # Hardlink hanya bisa di volume yang sama; kalau gagal, salin biasa.
+        # Hardlinks only work on the same volume; on failure, fall back to a plain copy.
         if (-not [DevkuHardLink]::Create($link, $file.FullName)) {
             Copy-Item -LiteralPath $file.FullName -Destination $link -Force
         }
@@ -125,7 +125,7 @@ if (-not $KeepConfig) {
         sites         = @()
     } | ConvertTo-Json -Depth 6
 
-    # Tanpa BOM: Config::load menolak JSON yang diawali BOM.
+    # No BOM: Config::load rejects JSON that starts with a BOM.
     [System.IO.File]::WriteAllText(
         (Join-Path $HomeDir 'config.json'),
         $config,

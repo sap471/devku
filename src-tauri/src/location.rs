@@ -1,7 +1,7 @@
-//! Lokasi folder data. Default-nya `%APPDATA%\DevKu`, tetapi pengguna boleh
-//! memindahkannya ke drive lain. Penunjuknya sendiri tetap tinggal di folder
-//! default supaya DevKu selalu bisa menemukan data walau data sudah pindah,
-//! dan supaya folder data bisa dihapus tanpa membuat aplikasi buta arah.
+//! Data folder location. Defaults to `%APPDATA%\DevKu`, but the user may
+//! move it to another drive. The pointer itself stays in the
+//! default folder so DevKu can always find the data even after it moved,
+//! and so the data folder can be deleted without leaving the app blind.
 
 use std::path::{Path, PathBuf};
 
@@ -12,8 +12,8 @@ use crate::paths::write_atomic;
 
 pub const POINTER_FILE: &str = "location.json";
 
-/// Berkas penunjuk tidak ikut disalin: isinya justru akan menunjuk ke folder
-/// yang salah setelah data berpindah.
+/// The pointer file is not copied: its contents would point at the wrong
+/// folder after the data moves.
 const POINTER_SKIP: &[&str] = &[POINTER_FILE];
 
 #[derive(Serialize, Deserialize)]
@@ -21,14 +21,14 @@ struct Pointer {
     home: String,
 }
 
-/// Asal folder data yang sedang dipakai, untuk ditampilkan di UI.
+/// Origin of the data folder in use, shown in the UI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     Default,
     Env,
     Pointer,
-    /// Penunjuk ada tetapi tidak bisa dibaca. Data kembali ke folder default
-    /// supaya aplikasi tetap bisa dibuka.
+    /// The pointer exists but cannot be read. Data falls back to the default folder
+    /// so the app can still open.
     Invalid,
 }
 
@@ -43,8 +43,8 @@ impl Source {
     }
 }
 
-/// `DEVKU_HOME` diutamakan karena dipakai uji dan pemakaian portabel. Nilainya
-/// kosong dianggap tidak diset.
+/// `DEVKU_HOME` wins because tests and portable use rely on it. An empty
+/// value counts as unset.
 pub fn env_home() -> Option<PathBuf> {
     std::env::var("DEVKU_HOME")
         .ok()
@@ -57,8 +57,8 @@ pub fn pointer_file(default_home: &Path) -> PathBuf {
     default_home.join(POINTER_FILE)
 }
 
-/// Dibaca tanpa panik: penunjuk rusak berarti kembali ke default, bukan
-/// aplikasi yang gagal dibuka.
+/// Read without panicking: a broken pointer means falling back to the default, not
+/// an app that fails to open.
 fn read_pointer(default_home: &Path) -> Result<Option<PathBuf>> {
     let file = pointer_file(default_home);
     if !file.exists() {
@@ -82,8 +82,8 @@ pub fn write_pointer(default_home: &Path, home: &Path) -> Result<()> {
     write_atomic(&pointer_file(default_home), &json)
 }
 
-/// Folder data efektif beserta asalnya. `env` diterima sebagai parameter
-/// supaya urutan prioritas bisa diuji tanpa menyentuh environment global.
+/// Effective data folder and its origin. `env` is passed as a parameter
+/// so the priority order can be tested without touching global environment.
 pub fn resolve(default_home: &Path, env: Option<PathBuf>) -> (PathBuf, Source) {
     if let Some(custom) = env {
         return (custom, Source::Env);
@@ -95,8 +95,8 @@ pub fn resolve(default_home: &Path, env: Option<PathBuf>) -> (PathBuf, Source) {
     }
 }
 
-/// Windows tidak membedakan huruf besar/kecil pada jalur, jadi perbandingan
-/// memakai bentuk yang sudah dinormalkan, bukan `Path::starts_with`.
+/// Windows treats paths case-insensitively, so the comparison
+/// uses normalized forms instead of `Path::starts_with`.
 fn normalized(path: &Path) -> String {
     let text = path.to_string_lossy().replace('/', "\\");
     text.trim_end_matches('\\').to_lowercase()
@@ -106,8 +106,8 @@ fn inside(child: &str, parent: &str) -> bool {
     child == parent || child.starts_with(&format!("{parent}\\"))
 }
 
-/// Aturan tujuan pemindahan. Folder tujuan wajib kosong supaya tidak ada
-/// berkas pengguna lain yang tertimpa atau tercampur tanpa disadari.
+/// Rules for the move destination. The destination folder must be empty so no
+/// other user files are overwritten or mixed in unnoticed.
 pub fn validate_target(current: &Path, target: &Path) -> Result<()> {
     if target.as_os_str().is_empty() {
         bail!("folder tujuan belum dipilih");
@@ -210,9 +210,9 @@ fn copy_dir(
     Ok(())
 }
 
-/// Menyalin seluruh isi folder data. Sumber tidak disentuh sampai pemanggil
-/// berhasil menulis penunjuk, jadi kegagalan di tengah jalan tidak menghapus
-/// apa pun.
+/// Copies the whole data folder. The source is untouched until the caller
+/// writes the pointer successfully, so a mid-way failure deletes
+/// nothing.
 pub fn copy_tree(from: &Path, to: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<Totals> {
     let mut total = Totals::default();
     measure(from, true, &mut total)?;
@@ -222,9 +222,9 @@ pub fn copy_tree(from: &Path, to: &Path, progress: &mut dyn FnMut(u64, u64)) -> 
     Ok(total)
 }
 
-/// Membuang isi folder lama setelah data pindah. Fungsinya best effort:
-/// berkas yang masih dikunci proses lain tidak boleh membuat pemindahan
-/// dianggap gagal, karena penunjuk sudah menunjuk ke folder baru.
+/// Discards the old folder contents after the data moves. Best effort:
+/// a file still locked by another process must not make the move
+/// count as failed, because the pointer already points at the new folder.
 pub fn prune_source(from: &Path) -> Result<()> {
     for entry in entries(from, true)? {
         let path = entry.path();

@@ -1,8 +1,8 @@
-//! Konsol untuk mode CLI di build release.
+//! Console support for CLI mode in release builds.
 //!
-//! Build release memakai subsistem `windows` supaya membuka DevKu dari
-//! Explorer tidak memunculkan jendela hitam. Konsekuensinya proses tidak
-//! mewarisi konsol, jadi jalur CLI harus meminjam konsol induk lebih dulu.
+//! Release builds use the `windows` subsystem so opening DevKu from
+//! Explorer does not flash a black window. The tradeoff is that the process
+//! does not inherit a console, so the CLI path must borrow the parent console first.
 
 #[cfg(all(windows, not(debug_assertions)))]
 use windows::Win32::Foundation::HANDLE;
@@ -15,16 +15,16 @@ pub fn attach_for_cli() {
         ATTACH_PARENT_PROCESS, AttachConsole, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
     };
 
-    // Simpan handle hasil redirect sebelum AttachConsole: pemanggilan itu
-    // mengganti std handle proses dengan handle konsol, termasuk yang tadinya
-    // menunjuk berkas dari `>` atau pipe dari `|`.
+    // Save redirected handles before AttachConsole: that call replaces the
+    // process std handles with console handles, including ones that used to
+    // point at a file from `>` or a pipe from `|`.
     let saved = [
         (STD_OUTPUT_HANDLE, redirect_handle(STD_OUTPUT_HANDLE)),
         (STD_ERROR_HANDLE, redirect_handle(STD_ERROR_HANDLE)),
     ];
 
-    // Gagal di sini normal kalau proses sudah punya konsol; keluaran tetap
-    // dicoba lewat CONOUT$ di bawah.
+    // Failure here is normal when the process already owns a console; output is
+    // still attempted through CONOUT$ below.
     unsafe {
         let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
@@ -39,8 +39,8 @@ pub fn attach_for_cli() {
     }
 }
 
-/// Handle yang sudah diarahkan skrip ke pipe atau berkas, kalau ada. Handle
-/// konsol atau handle kosong tidak perlu dipertahankan.
+/// Handle a script already pointed at a pipe or file, if any. Console
+/// handles and empty handles are not worth keeping.
 #[cfg(all(windows, not(debug_assertions)))]
 fn redirect_handle(std_handle: STD_HANDLE) -> Option<HANDLE> {
     use windows::Win32::Storage::FileSystem::{FILE_TYPE_DISK, FILE_TYPE_PIPE, GetFileType};
@@ -65,8 +65,8 @@ fn bind_console(std_handle: STD_HANDLE) {
     unsafe {
         let _ = SetStdHandle(std_handle, handle);
     }
-    // Handle harus hidup selama proses menulis; std mengambilnya ulang lewat
-    // GetStdHandle pada setiap cetakan.
+    // The handle must stay alive while the process writes; std re-fetches it via
+    // GetStdHandle on every print.
     std::mem::forget(console);
 }
 

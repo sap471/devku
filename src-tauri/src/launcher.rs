@@ -8,8 +8,8 @@ use serde::Serialize;
 use crate::runtime_detect::find_in_path;
 use crate::subprocess::hide_console_std;
 
-/// Satu baris di menu "Buka". Target yang aplikasinya tidak terpasang tetap
-/// ditampilkan tapi nonaktif, supaya user tahu kenapa tidak ada di daftar.
+/// One row in the "Buka" menu. A target whose app is not installed is still
+/// shown but disabled, so the user knows why it is not on the list.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct OpenTarget {
     pub id: &'static str,
@@ -72,8 +72,8 @@ pub fn open(dir: &Path, target: &str) -> Result<()> {
     }
 }
 
-/// Membuka satu berkas di editor. Urutannya VS Code, Zed, lalu Notepad, supaya
-/// tombolnya tetap bekerja di mesin yang tidak punya editor terpasang.
+/// Opens one file in an editor. The order is VS Code, Zed, then Notepad, so
+/// the button still works on a machine with no editor installed.
 pub fn open_file(path: &Path) -> Result<&'static str> {
     if !path.exists() {
         bail!("berkas {} tidak ada", path.display());
@@ -104,7 +104,7 @@ pub fn open_file(path: &Path) -> Result<&'static str> {
     Ok(label)
 }
 
-/// `code` di Windows berupa `code.cmd`, jadi harus lewat shell.
+/// `code` on Windows is `code.cmd`, so it must go through a shell.
 fn run_in_shell(program: &str, dir: &Path, missing: &str) -> Result<()> {
     if find_in_path(program).is_none() {
         bail!("{missing}");
@@ -124,8 +124,8 @@ fn open_terminal(dir: &Path) -> Result<()> {
         return spawn_detached(&mut command);
     }
 
-    // Tanpa Windows Terminal, buka console sendiri: ini satu-satunya target
-    // yang memang harus terlihat, jadi tidak memakai CREATE_NO_WINDOW.
+    // Without Windows Terminal, open our own console: this is the only target
+    // that must actually be visible, so it skips CREATE_NO_WINDOW.
     let mut command = Command::new("cmd.exe");
     command.current_dir(dir);
     #[cfg(windows)]

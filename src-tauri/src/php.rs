@@ -6,8 +6,8 @@ use anyhow::{Context, Result, bail};
 use crate::paths::Paths;
 use crate::proc::ServiceSpec;
 
-/// Ekstensi yang hampir selalu dibutuhkan Laravel/CI. Sisanya bisa dinyalakan
-/// manual lewat php.ini — lebih baik default kecil daripada semua hidup.
+/// Extensions Laravel/CI almost always need. The rest can be enabled
+/// manually via php.ini; a small default beats everything on.
 const DEFAULT_EXTENSIONS: &[&str] = &[
     "curl",
     "fileinfo",
@@ -43,14 +43,14 @@ impl PhpManager {
         self.paths.php_dir(version).join(Self::binary_name())
     }
 
-    /// Berkas konfigurasi yang dibaca php-cgi lewat `PHPRC`.
+    /// Config file php-cgi reads via `PHPRC`.
     pub fn ini_path(&self, version: &str) -> PathBuf {
         self.paths.php_dir(version).join("php.ini")
     }
 
-    /// Versi yang benar-benar bisa dipakai: direktorinya punya binary php-cgi.
-    /// Urutannya numerik dan menaik, jadi `last()` selalu versi terbaru
-    /// (leksikografis akan menaruh 8.9 di atas 8.10).
+    /// Versions that are actually usable: their directory has a php-cgi binary.
+    /// Ordering is numeric ascending, so `last()` is always the newest version
+    /// (lexicographic order would put 8.9 above 8.10).
     pub fn installed(&self) -> Vec<String> {
         let base = self.paths.engines().join("php");
         let mut out = BTreeSet::new();
@@ -88,8 +88,8 @@ impl PhpManager {
         Ok(dest)
     }
 
-    /// php.ini-development disalin sekali, lalu dirapikan seperlunya. Kalau user
-    /// sudah punya php.ini, jangan sentuh.
+    /// php.ini-development is copied once, then cleaned up as needed. If the user
+    /// already has a php.ini, do not touch it.
     pub fn ensure_ini(&self, version: &str) -> Result<PathBuf> {
         let dir = self.paths.php_dir(version);
         let ini = self.ini_path(version);
@@ -128,7 +128,7 @@ impl PhpManager {
         self.paths.php_dir(version).join("ext")
     }
 
-    /// Gabungan dll di `ext/` dan arahan di php.ini untuk satu versi.
+    /// Combined dlls in `ext/` and directives in php.ini for one version.
     pub fn extensions(&self, version: &str) -> Result<Vec<crate::extensions::ExtensionEntry>> {
         let ini = self.ensure_ini(version)?;
         let text = std::fs::read_to_string(&ini)?;
@@ -155,8 +155,8 @@ impl PhpManager {
         Ok(crate::extensions::scan(&text, dlls))
     }
 
-    /// Ubah satu ekstensi di php.ini. Mengembalikan true kalau berkas
-    /// benar-benar ditulis ulang.
+    /// Changes one extension in php.ini. Returns true when the file
+    /// is actually rewritten.
     pub fn set_extension(&self, version: &str, name: &str, enable: bool) -> Result<bool> {
         if enable {
             let exists = crate::extensions::normalize_name(name).is_some_and(|name| {
@@ -205,8 +205,8 @@ impl PhpManager {
     }
 }
 
-/// `8.10.2` > `8.9.0`, juga untuk nama build `8.5.12-1`. Bagian non-angka
-/// diabaikan, cukup untuk memilih kronologi rilis PHP.
+/// `8.10.2` > `8.9.0`, also for build names like `8.5.12-1`. Non-numeric
+/// parts are ignored, which suffices to order PHP releases.
 pub fn version_key(version: &str) -> Vec<u64> {
     version
         .split(|ch: char| !ch.is_ascii_digit())
@@ -254,7 +254,7 @@ mod tests {
 
         assert!(text.contains("extension_dir = \"ext\""));
         assert!(text.contains("extension=mbstring"));
-        // Ekstensi di luar daftar default harus tetap terkomen.
+        // Extensions outside the default list must stay commented out.
         assert!(text.contains(";extension=snmp"));
 
         let _ = std::fs::remove_dir_all(&root);
@@ -276,7 +276,7 @@ mod tests {
 
         let manager = PhpManager::new(Paths { root: root.clone() });
         let entries = manager.extensions("8.4.5").unwrap();
-        // curl ikut DEFAULT_EXTENSIONS, jadi ensure_ini sudah menyalakannya.
+        // curl is in DEFAULT_EXTENSIONS, so ensure_ini already enabled it.
         let curl = entries.iter().find(|entry| entry.name == "curl").unwrap();
         assert!(curl.dll && curl.enabled);
 
@@ -287,7 +287,7 @@ mod tests {
         assert!(opcache.dll && opcache.zend && !opcache.enabled);
         assert_eq!(entries.len(), 2);
 
-        // Menyalakan tanpa dll harus ditolak: php-cgi akan gagal start.
+        // Enabling without the dll must be rejected: php-cgi would fail to start.
         let missing = manager.set_extension("8.4.5", "mbstring", true);
         assert!(missing.is_err());
 

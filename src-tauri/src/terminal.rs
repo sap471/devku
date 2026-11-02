@@ -128,8 +128,8 @@ fn joined_path(dirs: &[PathBuf]) -> String {
     join_paths(&dirs, &existing)
 }
 
-/// Folder DevKu ditaruh di depan supaya `php` yang dipasang lewat DevKu menang
-/// atas PHP lain di mesin ini.
+/// The DevKu folder goes first so a `php` installed through DevKu wins
+/// over any other PHP on this machine.
 fn join_paths(dirs: &[String], existing: &str) -> String {
     let mut parts: Vec<&str> = dirs.iter().map(String::as_str).collect();
     if !existing.is_empty() {
@@ -141,8 +141,8 @@ fn join_paths(dirs: &[String], existing: &str) -> String {
 fn shell_command() -> CommandBuilder {
     #[cfg(windows)]
     {
-        // PowerShell menangani jalur berspasi lebih baik daripada cmd dan sudah
-        // tersedia di semua Windows 10/11.
+        // PowerShell handles paths with spaces better than cmd and ships
+        // with every Windows 10/11.
         let mut command = CommandBuilder::new("powershell.exe");
         command.args(["-NoLogo", "-NoProfile"]);
         command
@@ -154,7 +154,7 @@ fn shell_command() -> CommandBuilder {
     }
 }
 
-/// Dipakai perintah Tauri; menjaga nama channel tetap satu sumber.
+/// Used by Tauri commands; keeps the channel name in one place.
 pub fn channel(id: u32) -> String {
     format!("pty://{id}")
 }

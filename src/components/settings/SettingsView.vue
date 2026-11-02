@@ -81,8 +81,8 @@ const movePercent = computed(() => {
   return Math.min(100, Math.round((progress.done / progress.total) * 100));
 });
 
-/// Memindahkan folder data menyalin ratusan MB, jadi selalu lewat konfirmasi
-/// yang menyebut folder asal dan tujuan.
+/// Moving the data folder copies hundreds of MB, so it always goes through a confirmation
+/// that names the source and target folder.
 async function pickDataFolder(): Promise<void> {
   if (dataLocation.value?.locked || state.busy === "move-data") return;
   try {
@@ -131,8 +131,8 @@ async function resetWorkspace(): Promise<void> {
   await setWorkspace(null);
 }
 
-/// Versi pilihan tab Ekstensi: yang dipilih user, atau default global,
-/// atau terbesar yang terpasang (daftar installed_php menaik).
+/// Version picked in the Extensions tab: the one the user chose, or the global default,
+/// or the highest one installed (installed_php list is ascending).
 const extensionTarget = computed(() => defaultExtensionTarget());
 const extVersion = computed(() => state.phpExtensionsVersion || extensionTarget.value);
 
@@ -147,8 +147,8 @@ function chooseExtensionVersion(version: string): void {
   void loadPhpExtensions(version);
 }
 
-// Ekstensi dibaca dari disk lokal, jadi silakan dimuat tiap kali tab PHP
-// dibuka tanpa daftar cache. Yang sudah dihapus tidak boleh masih terpilih.
+// Extensions are read from the local disk, so load them every time the PHP tab
+// is opened, with no cached list. A deleted one must not stay selected.
 watch(
   () => [state.settingsTab, installedPhp.value.join(","), defaultPhp.value] as const,
   ([tab]) => {
@@ -1579,7 +1579,7 @@ function setTab(tab: SettingsSubTab) {
   transform: translateX(12px);
 }
 
-/* Daftar ekstensi: satu baris per dll, scroll kalau memanjang. */
+/* Extension list: one row per dll, scrolls when it grows long. */
 .ext-list {
   max-height: 340px;
   overflow-y: auto;

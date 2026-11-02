@@ -3,8 +3,8 @@ use std::net::TcpListener;
 
 use anyhow::{Result, ensure};
 
-/// Port dianggap bebas kalau bind ke loopback berhasil. Ini cukup untuk dev
-/// lokal karena semua upstream DevKu hanya mendengar di 127.0.0.1.
+/// A port counts as free when binding to loopback succeeds. That is enough for local
+/// dev because every DevKu upstream listens on 127.0.0.1 only.
 pub fn is_free(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
@@ -21,8 +21,8 @@ pub fn first_free(from: u16, taken: &BTreeSet<u16>) -> Result<u16> {
     anyhow::bail!("tidak ada port bebas mulai {from}")
 }
 
-/// Alokasi satu port per versi PHP. Versi terurut supaya hasilnya deterministik
-/// antar start, jadi reload Caddy tidak mengubah upstream.
+/// Allocate one port per PHP version. Versions are sorted so the result is deterministic
+/// across starts, so a Caddy reload does not change upstreams.
 pub fn allocate(versions: &[String], start: u16) -> Result<Vec<(String, u16)>> {
     ensure!(start > 1024, "port awal harus di atas 1024");
 

@@ -21,8 +21,8 @@ pub struct Site {
     pub path: PathBuf,
     pub domain: String,
     pub php: String,
-    /// Akar project, yang belum tentu sama dengan akar web (`public/` untuk
-    /// Laravel). Dipakai terminal dan script runner.
+    /// Project root, which is not necessarily the web root (`public/` for
+    /// Laravel). Used by the terminal and the script runner.
     #[serde(default)]
     pub root: Option<PathBuf>,
     #[serde(default)]
@@ -39,12 +39,12 @@ fn yes() -> bool {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PhpSettings {
-    /// Daftar versi sengaja tidak disimpan di sini: apa yang terpasang dibaca
-    /// langsung dari folder `engines/php`, jadi folder hasil ekstraksi manual
-    /// tetap terdeteksi tanpa perlu mendaftar dulu.
+    /// The version list is deliberately not stored here: what is installed is
+    /// read straight from `engines/php`, so a manually extracted folder is
+    /// still detected without registering it first.
     #[serde(default)]
     pub active: String,
-    /// Jumlah worker per versi. 0 = biarkan PHP memakai default-nya.
+    /// Number of workers per version. 0 = let PHP use its default.
     #[serde(default = "default_children")]
     pub children: u16,
 }
@@ -70,20 +70,20 @@ pub struct Config {
     pub backend: Backend,
     #[serde(default = "default_tld")]
     pub tld: String,
-    /// Folder induk project. Kosong berarti `%USERPROFILE%\DevKu\sites`.
-    /// Isi project sengaja tidak ikut folder data supaya memindahkan data
-    /// aplikasi tidak menyentuh project.
+    /// Parent folder for projects. Empty means `%USERPROFILE%\DevKu\sites`.
+    /// Project contents deliberately stay out of the data folder so moving app
+    /// data does not touch the projects.
     #[serde(default)]
     pub workspace: Option<PathBuf>,
-    /// Menyalakan service begitu aplikasi dibuka. Bisa dimatikan di config.
+    /// Starts services as soon as the app opens. Can be disabled in config.
     #[serde(default = "yes")]
     pub autostart: bool,
-    /// Catatan bahwa CA lokal Caddy sudah dipercaya sistem. Bukan hasil cek
-    /// live, jadi tombol Percayai tetap boleh dijalankan ulang kapan saja.
+    /// Record that the system already trusts Caddy's local CA. Not a live
+    /// check, so the Percayai button may still be run again at any time.
     #[serde(default)]
     pub https_trusted: bool,
-    /// First-run sudah selesai atau dilewati. Config lama tanpa field ini
-    /// dianggap belum, tetapi onboarding hanya tampil saat belum ada situs.
+    /// First run is done or skipped. Old configs without this field count as
+    /// not done, but onboarding only shows while there is no site yet.
     #[serde(default)]
     pub onboarded: bool,
     #[serde(default)]
@@ -96,15 +96,15 @@ pub struct Config {
     pub sites: Vec<Site>,
 }
 
-/// Pengaturan server database lokal.
+/// Local database server settings.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DatabaseSettings {
-    /// Port TCP. 3306 adalah bawaan MariaDB dan yang dipakai `.env` Laravel,
-    /// jadi angka ini yang paling sering benar.
+    /// TCP port. 3306 is the MariaDB default and what Laravel `.env` files use,
+    /// so this number is the one most often correct.
     #[serde(default = "default_db_port")]
     pub port: u16,
-    /// Database hanya menyala kalau dicentang. Default mati karena ini fitur
-    /// tambahan, bukan syarat menjalankan situs.
+    /// The database starts only when checked. Off by default because it is an
+    /// add-on feature, not a requirement for running a site.
     #[serde(default)]
     pub autostart: bool,
 }
@@ -122,8 +122,8 @@ impl Default for DatabaseSettings {
     }
 }
 
-/// Apache dipasang DevKu di `engines/apache` dan hanya mendengarkan loopback.
-/// Caddy di 80/443 meneruskan situs Apache ke port internal ini.
+/// DevKu installs Apache in `engines/apache` and it listens on loopback only.
+/// Caddy on 80/443 forwards Apache sites to this internal port.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ApacheSettings {
     #[serde(default = "default_apache_port")]
@@ -190,32 +190,32 @@ impl Config {
         write_atomic(&paths.config_file(), &json)
     }
 
-    /// Backend efektif satu site: pilihan site, atau default global untuk
-    /// site lama yang belum pernah memilih.
+    /// Effective backend for one site: the site's choice, or the global default
+    /// for an old site that never chose.
     pub fn backend_of(&self, site: &Site) -> Backend {
         site.backend.unwrap_or(self.backend)
     }
 
-    /// Semua site aktif, untuk hosts file dan alokasi pool PHP. Server yang
-    /// melayani tiap site ditentukan `backend_of`.
+    /// All active sites, for the hosts file and PHP pool allocation. The server
+    /// serving each site is decided by `backend_of`.
     pub fn served_sites(&self) -> impl Iterator<Item = &Site> {
         self.sites.iter().filter(|site| site.enabled)
     }
 
-    /// Site yang diteruskan Caddy ke httpd internal.
+    /// Sites Caddy forwards to the internal httpd.
     pub fn apache_sites(&self) -> impl Iterator<Item = &Site> {
         self.served_sites()
             .filter(|site| self.backend_of(site) == Backend::Apache)
     }
 
-    /// Semua situs diakses lewat domain tanpa port: Caddy di 80/443 menjadi
-    /// pintu masuk, termasuk untuk situs yang backend-nya Apache.
+    /// All sites are reached through a domain without a port: Caddy on 80/443
+    /// is the entry point, including for sites whose backend is Apache.
     pub fn site_url(&self, site: &Site) -> String {
         format!("http://{}/", site.domain)
     }
 
-    /// Folder induk project yang sedang berlaku. Nilai kosong berarti lokasi
-    /// bawaan, bukan berarti "tidak ada workspace".
+    /// The project parent folder in effect. An empty value means the default
+    /// location, not "no workspace".
     pub fn workspace_dir(&self) -> PathBuf {
         self.workspace
             .clone()
@@ -227,7 +227,7 @@ impl Config {
         format!("{id}.{}", self.tld)
     }
 
-    /// Versi PHP yang dipakai minimal satu site aktif, terurut supaya port stabil.
+    /// PHP versions used by at least one active site, sorted so ports stay stable.
     pub fn php_versions_in_use(&self) -> Vec<String> {
         let mut set: BTreeSet<String> = BTreeSet::new();
         for site in self.served_sites() {

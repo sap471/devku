@@ -5,16 +5,16 @@ use serde::Serialize;
 
 use crate::paths::Paths;
 
-/// Satu baris di PATH pengguna. Ditulis apa adanya (termasuk `%USERPROFILE%`
-/// yang belum di-expand) supaya entri lain tidak berubah saat kita menambah
-/// satu folder.
+/// One entry in the user PATH. Written verbatim (including `%USERPROFILE%`
+/// that is not yet expanded) so other entries stay unchanged when we add
+/// a folder.
 #[derive(Clone, Debug, Serialize)]
 pub struct PathStatus {
     pub dir: String,
     pub registered: bool,
-    /// Versi yang ditunjuk shim `php.bat`, kalau shim ada.
+    /// Version the `php.bat` shim points at, if the shim exists.
     pub shim_version: Option<String>,
-    /// True kalau shim menunjuk versi yang folder/binary-nya sudah hilang.
+    /// True when the shim points at a version whose folder/binary is gone.
     pub broken: bool,
 }
 
@@ -50,16 +50,16 @@ pub fn status(paths: &Paths) -> PathStatus {
     }
 }
 
-/// Apakah satu folder sudah ada di PATH pengguna. Dipakai juga oleh jalur
-/// Composer global yang tidak lewat shim DevKu.
+/// Whether a folder is already in the user PATH. Also used by the global
+/// Composer path, which does not go through the DevKu shim.
 pub fn is_registered(dir: &Path) -> bool {
     user_path()
         .map(|text| contains(&text, dir))
         .unwrap_or(false)
 }
 
-/// Menambahkan satu folder ke PATH pengguna tanpa mengubah entri lain. Kalau
-/// sudah ada, tidak ada yang ditulis ulang.
+/// Adds one folder to the user PATH without touching other entries. If it is
+/// already there, nothing is rewritten.
 pub fn add_dir(dir: &Path) -> Result<()> {
     let text = load_user_path()?;
     if !contains(&text, dir) {
@@ -69,7 +69,7 @@ pub fn add_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Melepas satu folder dari PATH pengguna. Entri lain dibiarkan apa adanya.
+/// Removes one folder from the user PATH. Other entries are left as they are.
 pub fn remove_dir(dir: &Path) -> Result<()> {
     let text = load_user_path()?;
     let next = without(&text, dir);
@@ -80,8 +80,8 @@ pub fn remove_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Memasang shim `php.bat` yang meneruskan semua argumen ke versi tertentu,
-/// lalu memastikan folder `bin` ada di PATH pengguna.
+/// Installs a `php.bat` shim that forwards every argument to a given version,
+/// then makes sure the `bin` folder is in the user PATH.
 pub fn register(paths: &Paths, version: &str) -> Result<()> {
     let binary = paths.php_dir(version).join("php.exe");
     if !binary.exists() {
@@ -92,8 +92,8 @@ pub fn register(paths: &Paths, version: &str) -> Result<()> {
     add_dir(&bin_dir(paths))
 }
 
-/// Menghapus folder `bin` dari PATH pengguna dan membuang shim-nya. Entri PATH
-/// lain tidak disentuh.
+/// Deletes the `bin` folder from the user PATH and discards its shim. Other
+/// PATH entries are left alone.
 pub fn unregister(paths: &Paths) -> Result<()> {
     remove_dir(&bin_dir(paths))?;
 
@@ -107,8 +107,8 @@ pub fn unregister(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
-/// Dipanggil saat versi PHP default berubah. Kalau PATH belum terdaftar,
-/// tidak ada yang perlu dilakukan.
+/// Called when the default PHP version changes. If the PATH entry is not
+/// registered, there is nothing to do.
 pub fn sync_shim(paths: &Paths, version: &str) -> Result<()> {
     if !status(paths).registered {
         return Ok(());
@@ -124,16 +124,16 @@ fn write_shim(paths: &Paths, version: &str, binary: &Path) -> Result<()> {
     let dir = bin_dir(paths);
     std::fs::create_dir_all(&dir)?;
 
-    // `%*` meneruskan argumen tanpa diubah, jadi `php -r "..."`, `php -S`,
-    // dan `php artisan` berperilaku sama seperti memanggil binary aslinya.
+    // `%*` forwards arguments unchanged, so `php -r "..."`, `php -S`,
+    // and `php artisan` behave as if calling the real binary.
     let script = format!("@echo off\r\n\"{}\" %*\r\n", binary.display());
     std::fs::write(shim_file(paths), script)?;
     std::fs::write(marker_file(paths), format!("{version}\n"))?;
     Ok(())
 }
 
-/// Memeriksa satu entri PATH tanpa peduli huruf besar/kecil, spasi, tanda
-/// kutip, atau garis miring di ujung.
+/// Checks a single PATH entry ignoring case, spaces, quotes, and a trailing
+/// slash.
 pub fn contains(path: &str, dir: &Path) -> bool {
     let wanted = normalize(&dir.to_string_lossy());
     path.split(';').any(|entry| normalize(entry) == wanted)
@@ -197,16 +197,16 @@ mod store {
 
         match key.get_raw_value(value) {
             Ok(raw) => Ok(decode(&raw)),
-            // Kunci ada tapi nilainya belum pernah dibuat.
+            // The key exists but its value was never created.
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
             Err(err) => Err(err).context("gagal membaca PATH pengguna"),
         }
     }
 
-    /// PATH pengguna selalu ditulis sebagai REG_EXPAND_SZ berisi UTF-16, bentuk
-    /// yang dipakai Windows sendiri. REG_SZ + byte UTF-16 adalah kombinasi yang
-    /// pernah ditemukan di mesin nyata dan membuat PATH terbaca sebagai sampah,
-    /// jadi representasi itu tidak pernah kita hasilkan.
+    /// The user PATH is always written as REG_EXPAND_SZ holding UTF-16, the form
+    /// Windows itself uses. REG_SZ plus UTF-16 bytes is a combination seen on
+    /// real machines that makes PATH read as garbage, so we never produce that
+    /// representation.
     pub(super) fn save_at(root: &RegKey, key: &str, value: &str, text: &str) -> Result<()> {
         let key = root
             .create_subkey(key)
@@ -244,9 +244,9 @@ mod store {
         text.trim_end_matches('\0').to_string()
     }
 
-    /// Nilai REG_SZ semestinya berisi byte ANSI, tapi ada mesin yang menyimpan
-    /// UTF-16 di dalamnya; PATH di mesin ini pernah begitu dan terbaca sebagai
-    /// sampah. Bila seperempat isinya NUL, itu UTF-16, bukan teks ANSI.
+    /// A REG_SZ value should hold ANSI bytes, but some machines store UTF-16 in
+    /// it; the PATH on this machine was once like that and read as garbage. If a
+    /// quarter of the content is NUL, it is UTF-16, not ANSI text.
     fn looks_utf16(bytes: &[u8]) -> bool {
         if bytes.len() < 4 || !bytes.len().is_multiple_of(2) {
             return false;
@@ -255,8 +255,8 @@ mod store {
         zeros * 4 > bytes.len()
     }
 
-    /// Explorer (dan terminal yang dibukanya) hanya membaca environment saat
-    /// menerima pesan ini. Tanpa broadcast, `php` baru terlihat setelah logoff.
+    /// Explorer (and terminals it spawns) only read the environment when they
+    /// receive this message. Without a broadcast, `php` only appears after logoff.
     pub fn broadcast() {
         use windows::Win32::Foundation::{LPARAM, WPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{
@@ -389,8 +389,8 @@ mod tests {
 
     #[test]
     fn utf16_bytes_inside_reg_sz_still_decode_as_text() {
-        // Nilai seperti ini pernah ditemukan di PATH pengguna: byte UTF-16
-        // dengan label REG_SZ. Dibaca sebagai ANSI hasilnya penuh NUL.
+        // This kind of value was found in a user PATH: UTF-16 bytes labelled
+        // REG_SZ. Read as ANSI the result is full of NULs.
         let text = r"C:\Windows;C:\Tools";
         let mut bytes = Vec::new();
         for unit in text.encode_utf16().chain(std::iter::once(0)) {
@@ -412,12 +412,12 @@ mod tests {
         assert_eq!(store::decode(&raw), r"C:\Windows\System32");
     }
 
-    /// Jalankan dengan `cargo test --lib register_then_unregister -- --ignored`.
-    /// Test ini menulis PATH pengguna sungguhan, lalu mengembalikannya persis
-    /// seperti semula (Drop tetap memulihkan walau assert gagal).
+    /// Run with `cargo test --lib register_then_unregister -- --ignored`.
+    /// This test writes the real user PATH, then restores it exactly as it was
+    /// (Drop still restores even if an assert fails).
     #[cfg(windows)]
     #[test]
-    #[ignore = "menulis PATH pengguna sungguhan"]
+    #[ignore = "writes the real user PATH"]
     fn register_then_unregister_restores_user_path() {
         let root = std::env::temp_dir().join(format!("devku-pathenv-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);

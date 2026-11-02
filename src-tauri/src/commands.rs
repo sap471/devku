@@ -12,8 +12,8 @@ use crate::php::PhpManager;
 use crate::session::{ImportReport, PhpExtensionsView, Session, SiteDraft, Snapshot};
 
 pub struct AppState {
-    /// None berarti config gagal dibaca. UI harus menampilkan galat, bukan
-    /// crash, dan tidak boleh menulis apa pun sampai user memperbaikinya.
+    /// None means the config failed to load. The UI must show an error, not
+    /// crash, and must not write anything until the user fixes it.
     pub session: Mutex<Option<Session>>,
     pub boot_error: Option<String>,
 }
@@ -33,8 +33,8 @@ impl AppState {
     }
 }
 
-/// anyhow kehilangan rantai konteks saat di-Display biasa; `{:#}` menampilkan
-/// penyebab terdalam juga, yang justru dibutuhkan user.
+/// anyhow loses its context chain under plain Display; `{:#}` also shows
+/// the innermost cause, which is what the user needs.
 fn error(err: anyhow::Error) -> String {
     format!("{err:#}")
 }
@@ -82,9 +82,9 @@ pub async fn stop(state: State<'_, AppState>) -> Result<Snapshot, String> {
     Ok(session.snapshot().await)
 }
 
-/// `caddy trust` lewat aplikasi: jalankan binary terpakai, catat hasilnya di
-/// config, dan kembalikan snapshot terbaru. Butuh service hidup karena
-/// `caddy trust` mengambil info CA dari admin API.
+/// `caddy trust` from the app: run the binary in use, record the result in
+/// config, and return a fresh snapshot. Requires a live service because
+/// `caddy trust` reads CA info from the admin API.
 #[tauri::command]
 pub async fn trust_caddy(state: State<'_, AppState>) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
@@ -146,7 +146,7 @@ pub async fn runtimes(
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
     let paths = session.paths().clone();
-    // Deteksi menjalankan proses eksternal; jangan menahan runtime async.
+    // Detection spawns external processes; do not block the async runtime.
     tokio::task::spawn_blocking(move || crate::runtime_detect::detect(&paths))
         .await
         .map_err(|err| err.to_string())
@@ -161,8 +161,8 @@ pub async fn open_terminal(
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<u32, String> {
-    // Shell mewarisi PATH aplikasi, yang dibaca saat DevKu diluncurkan. Tanpa
-    // suntikan ini, `php` yang baru dipasang tidak terlihat di terminal.
+    // The shell inherits the app's PATH, read when DevKu starts. Without
+    // this injection, a freshly installed `php` is invisible in the terminal.
     let path_dirs = php_path_dirs(&state).await;
 
     terminals
@@ -191,8 +191,8 @@ async fn php_path_dirs(state: &State<'_, AppState>) -> Vec<PathBuf> {
         dirs.push(paths.php_dir(&chosen));
     }
 
-    // Bun bawaan hanya ada kalau mesin ini tidak punya Bun sendiri. Tanpa
-    // folder ini, tombol skrip `bun run ...` tidak akan menemukan binary-nya.
+    // The bundled Bun exists only when this machine has no Bun of its own. Without
+    // this folder, the `bun run ...` script button will not find its binary.
     let bun = paths.bundled_binary("bun");
     if bun.exists()
         && let Some(dir) = bun.parent()
@@ -200,14 +200,14 @@ async fn php_path_dirs(state: &State<'_, AppState>) -> Vec<PathBuf> {
         dirs.push(dir.to_path_buf());
     }
 
-    // Tool global Composer seperti `laravel` langsung bisa dipanggil di
-    // terminal DevKu, tanpa menunggu terminal baru membaca PATH pengguna.
+    // Composer global tools such as `laravel` can be called right away in
+    // the DevKu terminal, without waiting for a new terminal to read the user PATH.
     let composer_global = crate::composer::global_bin_dir();
     if composer_global.is_dir() {
         dirs.push(composer_global);
     }
 
-    // `mariadb` dan `mariadb-dump` bisa dipakai langsung di terminal DevKu.
+    // `mariadb` and `mariadb-dump` work directly in the DevKu terminal.
     let mariadb_bin = paths.mariadb_bin();
     if mariadb_bin.is_dir() {
         dirs.push(mariadb_bin);
@@ -248,15 +248,15 @@ pub struct PhpCatalogEntry {
     #[serde(flatten)]
     pub release: PhpRelease,
     pub installed: bool,
-    /// Berasal dari folder `engines/php`, bukan dari `releases.json`. Tidak
-    /// punya berkas unduhan, jadi UI hanya menampilkannya sebagai terpasang.
+    /// Comes from the `engines/php` folder, not from `releases.json`. It has
+    /// no download file, so the UI only shows it as installed.
     pub local: bool,
 }
 
 #[derive(Clone, Serialize)]
 struct DownloadProgress {
-    /// "php", "caddy", atau "bun". UI memakai ini untuk memilih baris mana yang
-    /// menampilkan progres.
+    /// "php", "caddy", or "bun". The UI uses this to pick which row
+    /// shows progress.
     target: &'static str,
     version: String,
     received: u64,
@@ -287,8 +287,8 @@ fn report(
 #[derive(Serialize)]
 pub struct PhpCatalogView {
     pub entries: Vec<PhpCatalogEntry>,
-    /// Diisi kalau daftar unduhan tidak bisa diambil. Versi yang sudah ada di
-    /// folder tetap ditampilkan, jadi koneksi mati bukan alasan kehilangan PHP.
+    /// Set when the download list cannot be fetched. Versions already in the
+    /// folder still show, so a dead connection is no reason to lose PHP.
     pub warning: Option<String>,
 }
 
@@ -312,13 +312,13 @@ pub async fn php_catalog(state: State<'_, AppState>) -> Result<PhpCatalogView, S
     Ok(PhpCatalogView { entries, warning })
 }
 
-/// `8.5.12-1` → `8.5`. Hanya untuk label cabang, bukan keputusan apapun.
+/// `8.5.12-1` to `8.5`. Only for branch labels, not for any decision.
 fn branch_of(version: &str) -> String {
     version.split('.').take(2).collect::<Vec<_>>().join(".")
 }
 
-/// Gabungan rilis resmi dan folder yang sudah ada. Dipisah dari perintah supaya
-/// bisa diuji tanpa jaringan dan tanpa Tauri.
+/// Official releases plus existing folders combined. Split from the command so
+/// it can be tested without network and without Tauri.
 fn build_catalog(releases: Vec<PhpRelease>, installed: &[String]) -> Vec<PhpCatalogEntry> {
     let mut entries: Vec<PhpCatalogEntry> = releases
         .into_iter()
@@ -329,8 +329,8 @@ fn build_catalog(releases: Vec<PhpRelease>, installed: &[String]) -> Vec<PhpCata
         })
         .collect();
 
-    // Folder yang sudah ada tetap terlihat walau versinya tidak lagi ada di
-    // releases.json: build lama, build custom, atau ekstraksi manual.
+    // Existing folders stay visible even when their version is gone from
+    // releases.json: old builds, custom builds, or manual extractions.
     for version in installed {
         if entries
             .iter()
@@ -354,9 +354,9 @@ fn build_catalog(releases: Vec<PhpRelease>, installed: &[String]) -> Vec<PhpCata
     entries
 }
 
-/// Mengunduh, memverifikasi SHA-256 dari releases.json, lalu memasang. Kalau
-/// ada langkah yang gagal, tidak ada folder setengah jadi yang ditinggalkan:
-/// ekstraksi baru dimulai setelah berkas utuh dan cocok.
+/// Downloads, verifies the SHA-256 from releases.json, then installs. If
+/// any step fails, no half-finished folder is left behind:
+/// extraction starts only after the file is complete and matches.
 #[tauri::command]
 pub async fn install_php(
     app: AppHandle,
@@ -482,9 +482,9 @@ async fn install_caddy_inner(
     Ok(())
 }
 
-/// Memasang Apache dari build Apache Lounge. DevKu memilih versi Win64
-/// terbaru di halaman resminya, memverifikasi SHA-256, lalu menyimpannya di
-/// `engines/apache/<versi>`.
+/// Installs Apache from Apache Lounge builds. DevKu picks the newest Win64
+/// version from the official page, verifies the SHA-256, then stores it in
+/// `engines/apache/<version>`.
 #[tauri::command]
 pub async fn install_apache(
     app: AppHandle,
@@ -494,8 +494,8 @@ pub async fn install_apache(
     let paths = session_paths(&state).await?;
     let cancel = slot.begin().map_err(error)?;
 
-    // httpd yang sedang jalan mengunci httpd.exe; hentikan dulu supaya
-    // pemasangan ulang versi yang sama tidak gagal di tengah ekstraksi.
+    // A running httpd locks httpd.exe; stop it first so
+    // reinstalling the same version does not fail mid-extraction.
     {
         let mut guard = state.session.lock().await;
         if let Some(session) = guard.as_mut() {
@@ -506,8 +506,8 @@ pub async fn install_apache(
     let result = install_apache_inner(&app, &paths, &cancel).await;
     slot.finish();
 
-    // Apa pun hasilnya, hidupkan lagi httpd yang tadi dihentikan supaya
-    // kegagalan unduhan tidak ikut mematikan situs Apache.
+    // Whatever the outcome, restart the httpd stopped earlier so
+    // a failed download does not also take down Apache sites.
     let mut guard = state.session.lock().await;
     let session = guard
         .as_mut()
@@ -590,8 +590,8 @@ async fn install_bun_inner(
     let version = asset.version.clone();
     let archive = paths.downloads().join(&asset.filename);
 
-    // GitHub tidak menerbitkan checksum untuk Bun, jadi integritas berkas
-    // bergantung pada HTTPS ke github.com.
+    // GitHub publishes no checksum for Bun, so file integrity
+    // rests on HTTPS to github.com.
     download::download(
         &client,
         &asset.url,
@@ -622,9 +622,9 @@ async fn install_bun_inner(
     Ok(())
 }
 
-/// Composer memakai PHP yang ada di PATH lebih dulu. Kalau tidak ada, PHP
-/// bawaan DevKu dipakai dan jalurnya diingat supaya shim tetap hidup di
-/// terminal DevKu.
+/// Composer uses the PHP on PATH first. When there is none, the PHP bundled with
+/// DevKu is used and its path is remembered so the shim keeps working in
+/// the DevKu terminal.
 #[tauri::command]
 pub async fn install_composer(
     app: AppHandle,
@@ -685,8 +685,8 @@ pub async fn set_site_backend(
     Ok(session.snapshot().await)
 }
 
-/// Port Apache terpisah dari 80/443 milik Caddy, jadi nilainya bisa diubah
-/// tanpa menyentuh Caddy.
+/// The Apache port is separate from Caddy's 80/443, so the value can change
+/// without touching Caddy.
 #[tauri::command]
 pub async fn set_apache_port(state: State<'_, AppState>, port: u16) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
@@ -698,7 +698,7 @@ pub async fn set_apache_port(state: State<'_, AppState>, port: u16) -> Result<Sn
     Ok(session.snapshot().await)
 }
 
-/// Folder induk project, bukan folder data. `None` mengembalikan ke bawaan.
+/// Project parent folder, not the data folder. `None` returns it to the default.
 #[tauri::command]
 pub async fn set_workspace(
     state: State<'_, AppState>,
@@ -726,10 +726,10 @@ pub struct MoveReport {
     pub bytes: u64,
 }
 
-/// Memindahkan folder data ke lokasi lain. Service dihentikan dulu karena
-/// berkas engine dan database sedang dipegang proses yang berjalan, lalu
-/// penunjuk ditulis setelah salinan lengkap. Aplikasi wajib dimulai ulang
-/// sesudahnya, dan UI yang memicunya.
+/// Moves the data folder to another location. Services are stopped first because
+/// running processes hold the engine and database files, then
+/// the pointer is written after the copy is complete. The app must restart
+/// afterwards, and the UI triggers it.
 #[tauri::command]
 pub async fn move_data_home(
     app: AppHandle,
@@ -751,9 +751,9 @@ pub async fn move_data_home(
     let target = PathBuf::from(path.trim());
     crate::location::validate_target(&current, &target).map_err(error)?;
 
-    // Shim di `bin/` menulis jalur absolut ke PHP, jadi setelah pindah harus
-    // ditulis ulang dan entri PATH lama harus diganti. Dicatat sebelum
-    // service dihentikan karena statusnya dibaca dari PATH pengguna.
+    // The shim in `bin/` writes an absolute path to PHP, so after a move it must
+    // be rewritten and the old PATH entry replaced. Captured before
+    // services stop because that state is read from the user PATH.
     let old_paths = Paths {
         root: current.clone(),
     };
@@ -774,7 +774,7 @@ pub async fn move_data_home(
     let totals = tokio::task::spawn_blocking(move || {
         let mut last = std::time::Instant::now();
         crate::location::copy_tree(&from, &copy_target, &mut |done, total| {
-            // Ratusan MB: laporan per berkas akan membanjiri channel.
+            // Hundreds of MB: per-file reports would flood the channel.
             if last.elapsed() >= std::time::Duration::from_millis(120) {
                 last = std::time::Instant::now();
                 let _ = emitter.emit("location://progress", MoveProgress { done, total });
@@ -788,8 +788,8 @@ pub async fn move_data_home(
     let default_home = crate::paths::default_home();
     crate::location::write_pointer(&default_home, &to).map_err(error)?;
 
-    // Penunjuk sudah benar. Sisa pekerjaan bersifat pembersihan: kegagalan di
-    // sini tidak boleh membuat pemindahan dianggap gagal.
+    // The pointer is correct. What remains is cleanup: a failure
+    // here must not mark the move as failed.
     let new_paths = Paths { root: to.clone() };
     if registered {
         let _ = crate::path_env::remove_dir(&crate::path_env::bin_dir(&old_paths));
@@ -799,8 +799,8 @@ pub async fn move_data_home(
         let _ = crate::path_env::sync_shim(&new_paths, &version);
     }
 
-    // Salinan sudah lengkap dan penunjuk sudah menunjuk ke sana, jadi sisa
-    // folder lama cukup dibersihkan tanpa membatalkan pemindahan.
+    // The copy is complete and the pointer already targets it, so the rest
+    // is cleaning the old folder without cancelling the move.
     let _ = crate::location::prune_source(&current);
 
     let _ = app.emit(
@@ -818,8 +818,8 @@ pub async fn move_data_home(
     })
 }
 
-/// Dipanggil setelah folder data berpindah. Service belum menyala di proses
-/// lama karena sudah dihentikan sebelum penyalinan.
+/// Called after the data folder moves. Services are not up in the old process
+/// because they were stopped before the copy.
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {
     app.restart();
@@ -872,8 +872,8 @@ pub struct PhpRemovalResponse {
     pub snapshot: Snapshot,
 }
 
-/// Membuka php.ini satu versi di editor. Nama editor dikembalikan supaya UI
-/// bisa menyebut apa yang barusan dibuka.
+/// Opens one version php.ini in an editor. The editor name is returned so the UI
+/// can say what was just opened.
 #[tauri::command]
 pub async fn open_php_ini(state: State<'_, AppState>, version: String) -> Result<String, String> {
     let guard = state.session.lock().await;
@@ -963,7 +963,7 @@ pub async fn remove_all_php(state: State<'_, AppState>) -> Result<PhpRemovalResp
 #[derive(Serialize)]
 pub struct DatabaseRemovalResponse {
     pub removal: crate::session::DatabaseRemoval,
-    /// Path berkas .sql kalau backup diminta.
+    /// Path to the .sql file when a backup was requested.
     pub backup: Option<String>,
     pub snapshot: Snapshot,
 }
@@ -1012,7 +1012,7 @@ async fn install_database_inner(
 
     report(app, "mariadb", version, 0, None, "pasang");
 
-    // Ekstraksi butuh waktu: sekitar 300 MB berkas kecil.
+    // Extraction takes a while: around 300 MB of small files.
     let dir = paths.mariadb_dir();
     let zip = archive.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
@@ -1097,7 +1097,7 @@ pub async fn remove_database(
         .as_mut()
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
-    // Backup hanya masuk akal kalau datanya memang ikut dibuang.
+    // A backup only makes sense when the data is actually discarded.
     let backup_path = if backup && remove_data {
         Some(session.backup_database().await.map_err(error)?)
     } else {
@@ -1139,7 +1139,7 @@ pub struct ImportResponse {
     pub snapshot: Snapshot,
 }
 
-/// Tulis config yang sedang dipakai ke berkas pilihan user.
+/// Write the config in use to a file the user chooses.
 #[tauri::command]
 pub async fn export_config(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let guard = state.session.lock().await;
@@ -1151,7 +1151,7 @@ pub async fn export_config(state: State<'_, AppState>, path: String) -> Result<(
     std::fs::write(&path, json).map_err(|err| format!("gagal menulis {path}: {err}"))
 }
 
-/// Ganti config dengan berkas dari mesin lain, lalu selaraskan runtime.
+/// Replace the config with a file from another machine, then align the runtime.
 #[tauri::command]
 pub async fn import_config(
     state: State<'_, AppState>,
@@ -1172,7 +1172,7 @@ pub async fn import_config(
     })
 }
 
-/// Nyalakan atau matikan pembukaan DevKu saat user login (HKCU Run).
+/// Turn DevKu launch at user login on or off (HKCU Run).
 #[tauri::command]
 pub async fn set_start_at_login(
     state: State<'_, AppState>,
@@ -1188,7 +1188,7 @@ pub async fn set_start_at_login(
     Ok(session.snapshot().await)
 }
 
-/// Tutup panel first-run, baik setelah selesai maupun dilewati.
+/// Close the first-run panel, whether finished or skipped.
 #[tauri::command]
 pub async fn finish_onboarding(state: State<'_, AppState>) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
@@ -1200,8 +1200,8 @@ pub async fn finish_onboarding(state: State<'_, AppState>) -> Result<Snapshot, S
     Ok(session.snapshot().await)
 }
 
-/// Daftarkan folder paket global Composer ke PATH pengguna, supaya `laravel`
-/// dan tool global lain bisa dipanggil dari terminal mana pun.
+/// Register the Composer global package folder on the user PATH, so `laravel`
+/// and other global tools can be called from any terminal.
 #[tauri::command]
 pub async fn enable_composer_global_path(state: State<'_, AppState>) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
@@ -1239,8 +1239,8 @@ pub async fn site_commands(
 ) -> Result<Vec<crate::scripts::CommandView>, String> {
     let paths = session_paths(&state).await?;
 
-    // Deteksi runtime menjalankan proses eksternal; lakukan di luar lock dan
-    // di luar worker async.
+    // Runtime detection spawns external processes; do it outside the lock and
+    // outside the async worker.
     let bun = tokio::task::spawn_blocking(move || {
         crate::runtime_detect::detect(&paths)
             .iter()
@@ -1268,8 +1268,8 @@ pub async fn site_commands(
         .map_err(|err| err.to_string())
 }
 
-/// Daftar aplikasi untuk membuka folder. Deteksi memanggil `where.exe`, jadi
-/// dijalankan di luar worker async.
+/// List of apps for opening folders. Detection calls `where.exe`, so
+/// it runs outside the async worker.
 #[tauri::command]
 pub async fn open_targets() -> Result<Vec<crate::launcher::OpenTarget>, String> {
     tokio::task::spawn_blocking(crate::launcher::targets)
@@ -1277,8 +1277,8 @@ pub async fn open_targets() -> Result<Vec<crate::launcher::OpenTarget>, String> 
         .map_err(|err| err.to_string())
 }
 
-/// `kind` hanya "site" (butuh `id`) atau "data". Path tidak datang dari UI,
-/// jadi jendela tidak bisa dipakai membuka folder sembarang.
+/// `kind` is only "site" (needs `id`) or "data". The path does not come from the UI,
+/// so the window cannot be used to open arbitrary folders.
 #[tauri::command]
 pub async fn open_in(
     state: State<'_, AppState>,
@@ -1295,8 +1295,8 @@ pub async fn open_in(
         match kind.as_str() {
             "data" => session.paths().root.clone(),
             "workspace" => {
-                // Tombol di titlebar dan Pengaturan boleh dipakai sebelum
-                // folder workspace pernah dibuat.
+                // Titlebar and Settings buttons must work before
+                // the workspace folder has ever been created.
                 let dir = session.config().workspace_dir();
                 std::fs::create_dir_all(&dir)
                     .map_err(|err| format!("gagal membuat {}: {err}", dir.display()))?;
@@ -1391,7 +1391,7 @@ mod tests {
         assert!(local.installed);
         assert!(local.release.filename.is_empty());
 
-        // Rilis resmi tetap hadir, jadi pemasangan versi lain tidak hilang.
+        // Official releases are still present, so installing another version stays possible.
         assert!(
             entries
                 .iter()

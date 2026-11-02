@@ -71,10 +71,10 @@ ${StrLoc}
 !define ESTIMATEDSIZE "{{estimated_size}}"
 !define STARTMENUFOLDER "{{start_menu_folder}}"
 
-; Teks tambahan di halaman konfirmasi uninstall. Kotak bawaan hanya berbunyi
-; "Delete the application data", padahal yang dihapus adalah engine dan
-; database yang tidak ikut terpasang ulang secara otomatis. Teks ini mengikuti
-; bahasa installer bawaan (Inggris), bukan bahasa UI aplikasi.
+; Extra text on the uninstall confirmation page. The stock box only says
+; "Delete the application data", while what gets deleted is engines and
+; databases that are not reinstalled automatically. This text follows
+; the installer's bundled language (English), not the app UI language.
 !define DEVKU_DATA_NOTE "Config, engines, and databases live in %APPDATA%\DevKu. They are kept unless the box above is ticked."
 
 Var PassiveMode
@@ -487,9 +487,9 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
   SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
 
-  ; Kotak centang bawaan tidak menyebut apa yang hilang, jadi folder data
-  ; dijelaskan di bawahnya. Diletakkan setelah baris centang selesai dihitung
-  ; supaya tetap rapi di layar ber-DPI tinggi.
+  ; The stock checkbox does not say what is lost, so the data folder
+  ; is explained below it. Placed after the checkbox line is measured
+  ; so it stays tidy on high-DPI screens.
   IntOp $8 $2 * 26
   IntOp $8 $8 / 96
   IntOp $5 $5 + $8
@@ -843,10 +843,10 @@ Section Uninstall
 
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
-  ; PATH pengguna masih menunjuk folder shim DevKu. Dilepas lewat perintah
-  ; yang sama dengan tombol di UI, sebelum binary dihapus, supaya menghapus
-  ; data tidak meninggalkan jalur mati. Kegagalan di sini tidak membatalkan
-  ; uninstall, karena sisa jalur bisa dibersihkan manual.
+  ; The user PATH still points at the DevKu shim folder. Removed through the same
+  ; command as the UI button, before the binary is deleted, so deleting
+  ; data does not leave dead paths behind. A failure here does not cancel
+  ; the uninstall, because leftover paths can be cleaned by hand.
   ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
     ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" php-path off'
   ${EndIf}

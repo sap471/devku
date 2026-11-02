@@ -13,8 +13,8 @@ pub fn hide_console_tokio(command: &mut tokio::process::Command) {
     command.creation_flags(CREATE_NO_WINDOW.0);
 }
 
-/// Menjalankan perintah sekali jalan tanpa jendela console dan mengembalikan
-/// keluarannya. Dipakai perkakas database yang hasilnya perlu dibaca.
+/// Runs a command once with no console window and returns
+/// its output. Used by database tools whose output has to be read.
 pub fn run_hidden(
     program: &std::path::Path,
     args: &[String],

@@ -12,8 +12,8 @@ use sha2::{Digest, Sha256, Sha512};
 const RELEASES_URL: &str = "https://windows.php.net/downloads/releases/releases.json";
 const RELEASES_BASE: &str = "https://windows.php.net/downloads/releases/";
 
-/// Satu build PHP yang bisa dipasang. `version` dipakai apa adanya sebagai nama
-/// folder, jadi build ulang seperti `8.3.36-1` tidak menimpa `8.3.36`.
+/// One installable PHP build. `version` is used verbatim as the folder name, so a
+/// rebuild like `8.3.36-1` does not overwrite `8.3.36`.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct PhpRelease {
     pub branch: String,
@@ -29,8 +29,8 @@ impl PhpRelease {
     }
 }
 
-/// Satu unduhan dalam satu waktu. Flag batal disimpan di sini supaya perintah
-/// `cancel_download` bisa menghentikan unduhan yang sedang berjalan.
+/// One download at a time. The cancel flag lives here so the `cancel_download`
+/// command can stop the download in flight.
 #[derive(Default)]
 pub struct Slot {
     current: Mutex<Option<Arc<AtomicBool>>>,
@@ -66,7 +66,7 @@ pub fn client() -> Result<Client> {
     Client::builder()
         .user_agent(concat!("DevKu/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
-        // Berkas PHP 35 MB; batas ini untuk koneksi lambat, bukan untuk macet.
+        // PHP archives are 35 MB; this bound covers slow links, not stalls.
         .timeout(Duration::from_secs(900))
         .build()
         .context("gagal menyiapkan klien HTTP")
@@ -87,9 +87,9 @@ pub async fn php_releases(client: &Client) -> Result<Vec<PhpRelease>> {
     parse_php_releases(&text)
 }
 
-/// Bentuk releases.json: `{ "8.3": { "version": "8.3.36-1", "nts-vs16-x64": {
-/// "zip": { "path": ..., "sha256": ... } } } }`. Yang dipakai build NTS x64,
-/// karena itulah yang dipakai php-cgi di Windows.
+/// releases.json shape: `{ "8.3": { "version": "8.3.36-1", "nts-vs16-x64": {
+/// "zip": { "path": ..., "sha256": ... } } } }`. The NTS x64 build is the one
+/// used, because that is what php-cgi runs on Windows.
 pub fn parse_php_releases(text: &str) -> Result<Vec<PhpRelease>> {
     let root: serde_json::Value =
         serde_json::from_str(text).context("bentuk releases.json tidak dikenali")?;
@@ -144,8 +144,8 @@ fn is_branch(key: &str) -> bool {
         && key.contains('.')
 }
 
-/// `8.3.36-1` -> (8, 3, 36). Sufiks build sengaja diabaikan saat mengurutkan,
-/// supaya build ulang menempati urutan versi yang sama.
+/// `8.3.36-1` -> (8, 3, 36). The build suffix is ignored for ordering on purpose,
+/// so a rebuild keeps the same version rank.
 fn rank(version: &str) -> (u32, u32, u32) {
     let mut parts = version
         .split(['.', '-'])
@@ -157,8 +157,8 @@ fn rank(version: &str) -> (u32, u32, u32) {
     )
 }
 
-/// Berkas rilis GitHub yang siap diunduh. Caddy dan Bun memakai alur yang sama,
-/// hanya nama berkasnya yang berbeda.
+/// A GitHub release asset ready to download. Caddy and Bun share the same flow,
+/// only the file name differs.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct RemoteAsset {
     pub target: &'static str,
@@ -193,9 +193,9 @@ pub async fn caddy_latest(client: &Client) -> Result<RemoteAsset> {
     })
 }
 
-/// Apache tidak menerbitkan biner Windows resmi, jadi DevKu mengambil build
-/// dari Apache Lounge. Halaman unduhannya stabil: satu tautan `Win64` per
-/// rilis, dan berkas checksum SHA-256 di sebelah arsipnya.
+/// Apache publishes no official Windows binaries, so DevKu takes builds from
+/// Apache Lounge. Its download page is stable: one `Win64` link per release,
+/// plus a SHA-256 checksum file next to the archive.
 const APACHE_PAGE: &str = "https://www.apachelounge.com/download/";
 
 pub async fn apache_latest(client: &Client) -> Result<RemoteAsset> {
@@ -218,7 +218,7 @@ pub async fn apache_latest(client: &Client) -> Result<RemoteAsset> {
         version,
         url: format!("https://www.apachelounge.com{path}"),
         filename,
-        // Ukuran tidak dicantumkan di halaman; progres memakai Content-Length.
+        // The page omits the size; progress relies on Content-Length.
         size: 0,
     })
 }
@@ -253,8 +253,8 @@ fn parse_apache_page(html: &str) -> Option<(String, String, String)> {
     None
 }
 
-/// Berkas checksum Apache Lounge berisi blok per algoritma, bukan format
-/// `sha256sum`, jadi digest diambil dari blok SHA256 khusus berkas ini.
+/// The Apache Lounge checksum file holds one block per algorithm, not the
+/// `sha256sum` format, so the digest comes from this file's SHA256 block.
 pub async fn apache_checksum(client: &Client, asset: &RemoteAsset) -> Result<String> {
     let url = format!("{}.txt", asset.url);
     let text = client
@@ -301,7 +301,7 @@ pub async fn bun_latest(client: &Client) -> Result<RemoteAsset> {
 
     Ok(RemoteAsset {
         target: "bun",
-        // Tag Bun berbentuk `bun-v1.4.4`.
+        // Bun tags look like `bun-v1.4.4`.
         version: release
             .tag
             .trim_start_matches("bun-")
@@ -369,7 +369,7 @@ fn parse_github_release(text: &str) -> Result<GhRelease> {
     Ok(GhRelease { tag, assets })
 }
 
-/// Caddy menerbitkan `caddy_<versi>_checksums.txt` berisi satu baris per berkas.
+/// Caddy publishes `caddy_<version>_checksums.txt` with one line per file.
 pub async fn caddy_checksum(client: &Client, version: &str, filename: &str) -> Result<String> {
     let url = format!(
         "https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_checksums.txt"
@@ -394,8 +394,8 @@ pub fn checksum_for(text: &str, filename: &str) -> Option<String> {
         let mut parts = line.split_whitespace();
         let digest = parts.next()?;
         let name = parts.next()?;
-        // `sha256sum` menulis `*nama` untuk mode biner dan `./nama` untuk
-        // daftar yang dibuat dari dalam folder, seperti milik MariaDB.
+        // `sha256sum` writes `*name` in binary mode and `./name` for lists
+        // generated from inside a folder, as MariaDB's is.
         let name = name.trim_start_matches('*').trim_start_matches("./");
         (name == filename).then(|| digest.to_string())
     })
@@ -420,12 +420,12 @@ pub async fn mariadb_checksum(client: &Client) -> Result<String> {
         .with_context(|| format!("{filename} tidak ada di daftar checksum MariaDB"))
 }
 
-/// Mengunduh ke `dest` sambil menghitung checksum. Algoritmanya dipilih dari
-/// panjang nilai yang diumumkan (64 = SHA-256, 128 = SHA-512). Berkas yang tidak
-/// cocok langsung dihapus, jadi yang tersisa di disk selalu bisa dipercaya.
+/// Downloads to `dest` while hashing the bytes. The algorithm follows the
+/// announced digest length (64 = SHA-256, 128 = SHA-512). A mismatched file is
+/// deleted at once, so whatever stays on disk can be trusted.
 ///
-/// Arsip yang sudah ada dan cocok dilewati tanpa menyentuh jaringan. Pemasangan
-/// ulang versi yang sama jadi tidak memakai kuota.
+/// An existing archive that matches is skipped without touching the network.
+/// Reinstalling the same version therefore costs no quota.
 pub async fn download(
     client: &Client,
     url: &str,
@@ -492,8 +492,8 @@ pub async fn download(
 
     hasher.verify(dest, expected)?;
 
-    // Catat sha256 supaya pemasangan berikutnya bisa memakai berkas ini tanpa
-    // mengunduh lagi, termasuk paket yang tidak punya checksum resmi.
+    // Record the sha256 so the next install can reuse this file without
+    // downloading again, including packages with no official checksum.
     if let Ok(digest) = digest_of(dest, 64) {
         let _ = crate::paths::write_atomic(&sidecar(dest), &format!("{digest}\n"));
     }
@@ -502,8 +502,8 @@ pub async fn download(
     Ok(())
 }
 
-/// Arsip dianggap siap pakai kalau checksum-nya cocok dengan yang diumumkan,
-/// atau dengan catatan dari unduhan sebelumnya kalau tidak ada yang diumumkan.
+/// An archive counts as usable when its checksum matches the announced one,
+/// or the record from a previous download when nothing is announced.
 fn archive_is_trusted(dest: &Path, expected: Option<&str>) -> bool {
     if !dest.exists() {
         return false;
@@ -564,7 +564,7 @@ fn digest_of(path: &Path, hex_length: usize) -> Result<String> {
     Ok(digest)
 }
 
-/// Jumlah dan ukuran arsip yang tersimpan, untuk ditampilkan di UI.
+/// Count and size of stored archives, for display in the UI.
 pub fn cached_archives(paths: &crate::paths::Paths) -> (usize, u64) {
     let mut files = 0;
     let mut bytes = 0;
@@ -587,7 +587,7 @@ pub fn cached_archives(paths: &crate::paths::Paths) -> (usize, u64) {
     (files, bytes)
 }
 
-/// Membuang arsip tersimpan. Semuanya bisa diunduh lagi saat dibutuhkan.
+/// Discards stored archives. All of them can be downloaded again when needed.
 pub fn clear_archives(paths: &crate::paths::Paths) -> Result<()> {
     let dir = paths.downloads();
     if !dir.exists() {
@@ -814,9 +814,9 @@ mod tests {
         assert!(rank("8.4.27") > rank("8.3.36"));
     }
 
-    /// Jalankan dengan `cargo test --lib installs_real_caddy -- --ignored`.
-    /// Mengunduh zip Caddy (~18 MB), memverifikasi SHA-512, lalu menjalankan
-    /// binary hasil ekstraksi.
+    /// Run with `cargo test --lib installs_real_caddy -- --ignored`.
+    /// Downloads the Caddy zip (~18 MB), verifies SHA-512, then runs the
+    /// extracted binary.
     #[test]
     #[ignore = "butuh jaringan"]
     fn installs_real_caddy_release() {
@@ -863,8 +863,8 @@ mod tests {
         });
     }
 
-    /// Jalankan dengan `cargo test --lib installs_real_bun -- --ignored`.
-    /// Mengunduh zip Bun (~55 MB) dan menjalankan binary hasil ekstraksi.
+    /// Run with `cargo test --lib installs_real_bun -- --ignored`.
+    /// Downloads the Bun zip (~55 MB) and runs the extracted binary.
     #[test]
     #[ignore = "butuh jaringan"]
     fn installs_real_bun_release() {
@@ -902,8 +902,8 @@ mod tests {
         });
     }
 
-    /// Jalankan dengan `cargo test --lib resolves_caddy -- --ignored`.
-    /// Hanya membaca metadata rilis, tidak mengunduh zip-nya.
+    /// Run with `cargo test --lib resolves_caddy -- --ignored`.
+    /// Only reads release metadata, does not download the zip.
     #[test]
     #[ignore = "butuh jaringan"]
     fn resolves_caddy_and_bun_releases() {
@@ -925,8 +925,8 @@ mod tests {
         assert!(bun.filename.starts_with("bun-windows-"));
     }
 
-    /// Jalankan dengan `cargo test --lib installs_real_php -- --ignored`.
-    /// Butuh jaringan dan mengunduh sekitar 35 MB.
+    /// Run with `cargo test --lib installs_real_php -- --ignored`.
+    /// Needs network and downloads about 35 MB.
     #[test]
     #[ignore = "butuh jaringan"]
     fn installs_real_php_release_from_windows_php_net() {
@@ -955,7 +955,7 @@ mod tests {
                 &cancel,
                 |received, total| {
                     if let Some(total) = total {
-                        // Bukti bahwa progres benar-benar mengalir, bukan 0%.
+                        // Proof that progress actually moves, not a flat 0%.
                         assert!(received <= total);
                     }
                 },
@@ -995,7 +995,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut reported = 0u64;
 
-        // URL yang tidak melayani apa pun: kalau unduhan tetap dicoba, tes gagal.
+        // A URL that serves nothing: if the download is still attempted, the test fails.
         let result = download(
             &client,
             "http://127.0.0.1:9/paket.zip",

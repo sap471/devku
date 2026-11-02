@@ -7,7 +7,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match args.first().map(String::as_str) {
-        // Tanpa argumen atau dari autostart login: jalur GUI, tanpa konsol.
+        // No argument or launched by login autostart: GUI path, no console.
         None | Some(devku_lib::autostart::HIDDEN_FLAG) => {
             devku_lib::run();
             ExitCode::SUCCESS
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
             devku_lib::cli::print_help();
             ExitCode::SUCCESS
         }
-        // Selain itu mode CLI: di build release konsol induk dipasang dulu.
+        // Otherwise CLI mode: in release builds the parent console is attached first.
         Some(_) => {
             devku_lib::console::attach_for_cli();
             devku_lib::cli::run(&args)

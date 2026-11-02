@@ -11,8 +11,8 @@ use crate::paths::Paths;
 use crate::proc::ServiceState;
 use crate::runtime::{Hook, Runtime};
 
-/// Permintaan tambah site dari UI. Semua opsional kecuali folder, karena
-/// pemindaian folder sudah bisa mengisi sisanya.
+/// Add-site request from the UI. Everything is optional except the folder, because
+/// scanning the folder can fill in the rest.
 #[derive(Clone, Debug, Deserialize)]
 pub struct SiteDraft {
     pub path: PathBuf,
@@ -35,14 +35,14 @@ pub struct SiteView {
     pub domain: String,
     pub php: String,
     pub framework: String,
-    /// "caddy" atau "apache" untuk situs ini. Keduanya diakses lewat Caddy
-    /// di 80/443; Apache hanya backend internalnya.
+    /// "caddy" or "apache" for this site. Both are reached through Caddy
+    /// on 80/443; Apache is only its internal backend.
     pub backend: String,
-    /// URL publik situs, selalu tanpa port.
+    /// Public site URL, never includes a port.
     pub url: String,
     pub enabled: bool,
     pub path: String,
-    /// Akar project, dipakai terminal. Untuk Laravel beda dengan `path`.
+    /// Project root, used by the terminal. For Laravel it differs from `path`.
     pub root: String,
     pub port: Option<u16>,
     pub status: String,
@@ -60,9 +60,9 @@ pub struct ServiceView {
 pub struct PhpExtensionView {
     pub name: String,
     pub enabled: bool,
-    /// Nilai benar berarti arahan di php.ini memakai `zend_extension=`.
+    /// A true value means the php.ini directive uses `zend_extension=`.
     pub zend: bool,
-    /// File php_*.dll ada di folder ext. Salah tanpa dll jangan bisa dinyalakan.
+    /// The php_*.dll file lives in the ext folder. An entry with no dll behind it must not be switchable on.
     pub available: bool,
 }
 
@@ -71,16 +71,16 @@ pub struct PhpExtensionsView {
     pub version: String,
     pub ini_path: String,
     pub entries: Vec<PhpExtensionView>,
-    /// Pool php-cgi untuk versi ini hidup: perubahan baru berlaku setelah
-    /// pool dinyalakan ulang.
+    /// The php-cgi pool for this version is up: a change only takes effect after
+    /// the pool is restarted.
     pub running: bool,
 }
 
-/// Ringkasan satu penghapusan PHP, supaya UI bisa menyebut apa yang ikut
-/// berubah alih-alih hanya "berhasil".
+/// Summary of one PHP removal, so the UI can say what was affected
+/// instead of only "berhasil".
 #[derive(Clone, Debug, Serialize)]
 pub struct PhpRemoval {
-    /// Versi yang dihapus. Kosong berarti semua versi sekaligus.
+    /// The removed version. Empty means every version at once.
     pub version: Option<String>,
     pub disabled_sites: Vec<String>,
     pub default_php: String,
@@ -88,8 +88,8 @@ pub struct PhpRemoval {
     pub removed_all: bool,
 }
 
-/// Keadaan server database lokal. Cukup untuk merender panel tanpa memanggil
-/// perintah lain.
+/// Local database server state. Enough to render the panel without calling
+/// other commands.
 #[derive(Clone, Debug, Serialize)]
 pub struct DatabaseView {
     pub engine: String,
@@ -116,53 +116,53 @@ pub struct Snapshot {
     pub tld: String,
     pub running: bool,
     pub caddy_installed: bool,
-    /// Catatan dari config: CA lokal Caddy pernah dipercaya lewat DevKu.
+    /// Config note: Caddy's local CA was once trusted through DevKu.
     pub https_trusted: bool,
-    /// First-run sudah selesai atau dilewati.
+    /// First run has completed or been skipped.
     pub onboarded: bool,
     pub installed_php: Vec<String>,
-    /// Versi yang dipakai untuk situs baru dan untuk shim `php` di PATH.
+    /// Version used for new sites and for the `php` shim on PATH.
     pub default_php: String,
     pub php_path: crate::path_env::PathStatus,
     pub composer_installed: bool,
     pub composer_version: Option<String>,
-    /// PHP yang dipakai shim Composer saat ini.
+    /// PHP the Composer shim currently uses.
     pub composer_php: Option<String>,
     pub composer_php_missing: bool,
-    /// Folder paket global Composer, tempat `laravel` dan tool lain berada.
+    /// Composer global package folder, where `laravel` and other tools live.
     pub composer_global: crate::composer::GlobalStatus,
-    /// Lokasi config yang sedang dipakai, supaya UI bisa menyebutnya.
+    /// Config location in use, so the UI can name it.
     pub config_path: String,
-    /// Folder data DevKu: config, engines, runtime, dan log.
+    /// DevKu data folder: config, engines, runtime, and logs.
     pub home_path: String,
-    /// Folder induk project untuk wizard dan tombol buka.
+    /// Project parent folder for the wizard and the open button.
     pub workspace: WorkspaceView,
-    /// Asal folder data, untuk menjelaskan dari mana nilainya datang.
+    /// Where the data folder came from, to explain how the value was resolved.
     pub data_location: DataLocationView,
-    /// Nilai Run di registry untuk binary yang sedang berjalan, bukan sekadar
-    /// catatan config: user bisa mencabutnya lewat Task Manager.
+    /// Registry Run value for the binary that is running now, not just
+    /// a config note: the user can remove it through Task Manager.
     pub start_at_login: bool,
     pub sites: Vec<SiteView>,
     pub services: Vec<ServiceView>,
-    /// Server database lokal, termasuk saat belum terpasang.
+    /// Local database server, including when it is not installed.
     pub database: DatabaseView,
-    /// Backend Apache opsional, selalu ada supaya UI bisa menampilkan
-    /// keadaannya walau belum diatur.
+    /// Optional Apache backend, always present so the UI can show
+    /// its state even before it is configured.
     pub apache: ApacheView,
-    /// Arsip engine yang tersimpan untuk pemasangan ulang.
+    /// Stored engine archives for reinstalling.
     pub downloads: DownloadsView,
 }
 
-/// Keadaan Apache: versi yang terpasang, port, dan status httpd.
+/// Apache state: installed version, port, and httpd status.
 #[derive(Clone, Debug, Serialize)]
 pub struct ApacheView {
-    /// Folder instalasi yang sedang dipakai, null kalau belum dipasang.
+    /// Installation folder in use, null when not installed.
     pub root: Option<String>,
-    /// Versi folder terbaru di `engines/apache`, misalnya `2.4.69-261002`.
+    /// Newest folder version under `engines/apache`, for example `2.4.69-261002`.
     pub version: Option<String>,
     pub installed: bool,
     pub port: u16,
-    /// Status service saat Apache ikut berjalan, "stopped" kalau tidak dipakai.
+    /// Service status while Apache is running, "stopped" when unused.
     pub status: String,
     pub detail: Option<String>,
 }
@@ -173,44 +173,44 @@ pub struct DownloadsView {
     pub bytes: u64,
 }
 
-/// Folder induk project. Dipakai wizard sebagai titik awal dan tombol buka
-/// folder, bukan sebagai daftar situs: situs tetap didaftarkan eksplisit.
+/// Project parent folder. The wizard uses it as a starting point and the open button
+/// uses it to open folders, not as a site list: sites are still registered explicitly.
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkspaceView {
     pub path: String,
-    /// true kalau pengguna memilih sendiri, false kalau masih bawaan.
+    /// true if the user picked it, false if it is still the default.
     pub custom: bool,
     pub exists: bool,
 }
 
-/// Di mana folder data berada. Penunjuk dipisahkan dari `home_path` supaya
-/// UI bisa menjelaskan asal nilainya dan menolak perubahan saat dikunci
-/// environment.
+/// Where the data folder lives. The pointer is split from `home_path` so
+/// the UI can explain the value origin and refuse changes while it is locked
+/// by the environment.
 #[derive(Clone, Debug, Serialize)]
 pub struct DataLocationView {
-    /// Folder data bawaan, tempat berkas penunjuk tinggal.
+    /// Default data folder, where the pointer file lives.
     pub default_home: String,
-    /// Penunjuk lokasi kustom, null selama data masih di folder bawaan.
+    /// Custom location pointer, null while data stays in the default folder.
     pub pointer: Option<String>,
-    /// "default", "environment", "custom", atau "invalid".
+    /// "default", "environment", "custom", or "invalid".
     pub source: String,
-    /// `DEVKU_HOME` sedang diset, jadi lokasi tidak bisa diubah dari UI.
+    /// `DEVKU_HOME` is set, so the location cannot be changed from the UI.
     pub locked: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ImportReport {
     pub imported: usize,
-    /// Site yang foldernya tidak ada di mesin ini.
+    /// Sites whose folder is missing on this machine.
     pub skipped: Vec<String>,
-    /// Site yang PHP-nya belum terpasang, jadi dinonaktifkan.
+    /// Sites whose PHP is not installed, so they were disabled.
     pub disabled: Vec<String>,
     pub active_php_cleared: Option<String>,
 }
 
-/// Pemilik state aplikasi: config di disk + runtime yang mungkin hidup.
-/// Semua perintah UI lewat sini, jadi tidak ada jalur yang menyentuh
-/// supervisor secara langsung.
+/// Application state owner: config on disk plus a runtime that may be up.
+/// Every UI command goes through here, so no path touches the
+/// supervisor directly.
 pub struct Session {
     paths: Paths,
     config: Config,
@@ -289,8 +289,8 @@ impl Session {
                 let (status, detail) = match (&self.runtime, state) {
                     (None, _) => ("stopped".to_string(), None),
                     (Some(_), Some(state)) if site.enabled => {
-                        // Site Apache mengikuti httpd: kalau httpd belum siap
-                        // atau gagal, status PHP yang "ready" menyesatkan.
+                        // An Apache site follows httpd: if httpd is not ready
+                        // or has failed, a "ready" PHP status is misleading.
                         match (&apache_service, backend) {
                             (Some((status, detail)), Backend::Apache) if status != "ready" => {
                                 (status.clone(), detail.clone())
@@ -446,8 +446,8 @@ impl Session {
             bail!("folder {} tidak ada", draft.path.display());
         }
 
-        // Penanda PHP hanya petunjuk, bukan syarat. Folder statis, project
-        // Bun/Node, atau folder kosong tetap boleh dijadikan situs.
+        // A PHP marker is only a hint, not a requirement. A static folder, a
+        // Bun/Node project, or an empty folder may still become a site.
         let found = detect::detect(&draft.path);
 
         let (framework, document_root) = match &found {
@@ -526,8 +526,8 @@ impl Session {
         self.refresh().await
     }
 
-    /// Ganti backend satu site. Apache harus sudah diatur lebih dulu supaya
-    /// site tidak diarahkan ke port yang tidak ada pendengarnya.
+    /// Switch one site's backend. Apache must be configured first so
+    /// the site is not pointed at a port with no listener.
     pub async fn set_site_backend(&mut self, id: &str, backend: Backend) -> Result<()> {
         if backend == Backend::Apache {
             let apache = crate::apache::ApacheBackend::from_config(&self.paths, &self.config);
@@ -544,9 +544,9 @@ impl Session {
         self.refresh().await
     }
 
-    /// Port internal Apache, terpisah dari 80/443 dan 2019 milik Caddy. Caddy
-    /// meneruskan situs Apache ke port ini, jadi nilainya tidak pernah tampil
-    /// di URL. Nilai yang bertabrakan ditolak supaya tidak gagal start.
+    /// Apache internal port, separate from Caddy's 80/443 and 2019. Caddy
+    /// forwards Apache sites to this port, so the value never appears
+    /// in a URL. Colliding values are rejected so startup does not fail.
     pub async fn set_apache_port(&mut self, port: u16) -> Result<()> {
         if port < 1024 {
             bail!("port Apache harus 1024 atau lebih");
@@ -560,9 +560,9 @@ impl Session {
         self.refresh().await
     }
 
-    /// Menetapkan folder induk project. `None` mengembalikannya ke lokasi
-    /// bawaan. Folder dibuat sekarang supaya pilihan di UI tidak menunjuk
-    /// tempat yang tidak ada.
+    /// Sets the project parent folder. `None` returns it to the default
+    /// location. The folder is created now so a UI choice never points
+    /// at a place that does not exist.
     pub async fn set_workspace(&mut self, path: Option<String>) -> Result<()> {
         let chosen = path
             .map(|value| value.trim().to_string())
@@ -584,15 +584,15 @@ impl Session {
         self.config.save(&self.paths)
     }
 
-    /// Berhenti tanpa mematikan service lain, dipakai sebelum memasang ulang
-    /// Apache karena berkas httpd.exe yang berjalan tidak bisa ditimpa.
+    /// Stops without touching other services; used before reinstalling
+    /// Apache because a running httpd.exe cannot be overwritten.
     pub async fn stop_apache(&mut self) {        if let Some(runtime) = self.runtime.as_mut() {
             runtime.stop_apache().await;
         }
     }
 
-    /// Berkas php.ini satu versi. Dibuat kalau belum ada, karena folder hasil
-    /// ekstraksi manual bisa datang tanpa berkas ini.
+    /// The php.ini for one version. Created when missing, because a folder from
+    /// a manual extraction can arrive without this file.
     pub fn php_ini_path(&self, version: &str) -> Result<PathBuf> {
         let manager = crate::php::PhpManager::new(self.paths.clone());
         if !manager.installed().iter().any(|item| item == version) {
@@ -601,8 +601,8 @@ impl Session {
         manager.ensure_ini(version)
     }
 
-    /// php-cgi membaca php.ini hanya saat proses dimulai, jadi perubahan baru
-    /// berlaku setelah pool versi itu dinyalakan ulang.
+    /// php-cgi reads php.ini only at process start, so a change only
+    /// takes effect after that version's pool is restarted.
     pub async fn restart_php(&mut self, version: &str) -> Result<()> {
         let manager = crate::php::PhpManager::new(self.paths.clone());
         if !manager.installed().iter().any(|item| item == version) {
@@ -618,7 +618,7 @@ impl Session {
         Ok(())
     }
 
-    /// Daftar ekstensi satu versi: dua sumber (dll dan php.ini) digabung.
+    /// Extension list for one version: two sources (dll and php.ini) merged.
     pub async fn php_extensions(&self, version: &str) -> Result<PhpExtensionsView> {
         let manager = crate::php::PhpManager::new(self.paths.clone());
         if !manager.installed().iter().any(|item| item == version) {
@@ -644,8 +644,8 @@ impl Session {
         })
     }
 
-    /// Hidup/matikan satu ekstensi lalu kembalikan daftar terbaru. Pool tidak
-    /// di-restart otomatis: UI yang menyatakan perlu restart dari view.
+    /// Enable or disable one extension, then return the fresh list. The pool is not
+    /// restarted automatically: the UI states the need for a restart from the view.
     pub async fn set_php_extension(
         &mut self,
         version: &str,
@@ -668,8 +668,8 @@ impl Session {
         })
     }
 
-    /// Hapus satu versi PHP. Situs yang memakainya dinonaktifkan, bukan
-    /// dipindah diam-diam ke versi lain.
+    /// Delete one PHP version. Sites using it are disabled rather than
+    /// silently moved to another version.
     pub async fn remove_php(&mut self, version: &str) -> Result<PhpRemoval> {
         let manager = crate::php::PhpManager::new(self.paths.clone());
         let installed = manager.installed();
@@ -723,8 +723,8 @@ impl Session {
         })
     }
 
-    /// Buang semua PHP, termasuk yang dipakai shim PATH. Semua situs
-    /// dinonaktifkan karena tidak ada lagi yang bisa melayaninya.
+    /// Remove every PHP, including the one the PATH shim uses. Every site
+    /// is disabled because nothing is left to serve them.
     pub async fn remove_all_php(&mut self) -> Result<PhpRemoval> {
         let manager = crate::php::PhpManager::new(self.paths.clone());
         let installed = manager.installed();
@@ -757,8 +757,8 @@ impl Session {
         })
     }
 
-    /// Composer mencatat jalur php.exe saat dipasang. Kalau versi itu dihapus,
-    /// penunjuknya dipindah ke default baru supaya Composer tetap jalan.
+    /// Composer records the php.exe path at install time. If that version is deleted,
+    /// its pointer moves to the new default so Composer keeps working.
     fn repoint_composer(&self, removed: &str) -> bool {
         let marker = crate::composer::php_marker(&self.paths);
         let Ok(text) = std::fs::read_to_string(&marker) else {
@@ -775,8 +775,8 @@ impl Session {
         crate::composer::set_php(&self.paths, &php).is_ok()
     }
 
-    /// Menyiapkan datadir MariaDB. Dipanggil setelah binari selesai diekstrak,
-    /// dan aman diulang.
+    /// Prepares the MariaDB datadir. Called after the binaries are extracted,
+    /// and safe to repeat.
     pub async fn prepare_database(&mut self) -> Result<()> {
         let backend = Mariadb::new(self.paths.clone());
         if !backend.is_installed() {
@@ -800,8 +800,8 @@ impl Session {
             bail!("MariaDB belum terpasang");
         }
 
-        // Binari bisa datang tanpa datadir, misalnya setelah folder data
-        // dibersihkan. Menyiapkan di sini membuat tombol Mulai selalu bekerja.
+        // Binaries can arrive without a datadir, for example after the data folder
+        // was cleaned. Preparing here keeps the Mulai button working.
         backend.initialize(self.config.database.port)?;
         if !self.paths.mariadb_password().exists() {
             backend.store_password("")?;
@@ -824,8 +824,8 @@ impl Session {
         Ok(())
     }
 
-    /// Ceklis autostart menentukan apakah database ikut hidup dan mati bersama
-    /// service lain.
+    /// The autostart checkbox decides whether the database starts and stops with
+    /// the other services.
     pub async fn set_database_autostart(&mut self, enabled: bool) -> Result<()> {
         self.config.database.autostart = enabled;
         self.config.save(&self.paths)?;
@@ -840,8 +840,8 @@ impl Session {
         Ok(())
     }
 
-    /// Mengubah password root di semua akun root. Kalau catatan password DevKu
-    /// sudah basi, server dinyalakan ulang tanpa grant table sebentar.
+    /// Changes the root password on every root account. If the DevKu password note
+    /// is stale, the server is restarted briefly without the grant tables.
     pub async fn reset_database_password(&mut self, password: &str) -> Result<()> {
         let backend = Mariadb::new(self.paths.clone());
         if !backend.is_installed() || !backend.is_initialized() {
@@ -883,7 +883,7 @@ impl Session {
         Ok(())
     }
 
-    /// Backup semua database buatan user ke berkas .sql bertanggal.
+    /// Back up every user-created database to a dated .sql file.
     pub async fn backup_database(&mut self) -> Result<PathBuf> {
         let backend = Mariadb::new(self.paths.clone());
         if !backend.is_installed() || !backend.is_initialized() {
@@ -917,7 +917,7 @@ impl Session {
         Ok(dest)
     }
 
-    /// Menghapus binari MariaDB. Data hanya ikut terhapus kalau diminta.
+    /// Deletes the MariaDB binaries. Data is deleted only when requested.
     pub async fn remove_database(&mut self, remove_data: bool) -> Result<DatabaseRemoval> {
         let backend = Mariadb::new(self.paths.clone());
         if !backend.is_installed() && !backend.is_initialized() {
@@ -953,8 +953,8 @@ impl Session {
         self.refresh().await
     }
 
-    /// Mengganti versi PHP satu situs. Kalau runtime hidup, pool versi baru
-    /// dinyalakan dan yang lama dimatikan lewat `refresh`.
+    /// Switches one site's PHP version. If the runtime is up, the new version's pool
+    /// is started and the old one stopped through `refresh`.
     pub async fn set_php(&mut self, id: &str, php: &str) -> Result<()> {
         let installed = crate::php::PhpManager::new(self.paths.clone()).installed();
         if !installed.iter().any(|version| version == php) {
@@ -976,7 +976,7 @@ impl Session {
         self.refresh().await
     }
 
-    /// Versi default untuk situs baru dan untuk shim `php` di PATH.
+    /// Default version for new sites and for the `php` shim on PATH.
     pub fn set_default_php(&mut self, php: &str) -> Result<()> {
         let installed = crate::php::PhpManager::new(self.paths.clone()).installed();
         if !installed.iter().any(|version| version == php) {
@@ -989,16 +989,16 @@ impl Session {
         Ok(())
     }
 
-    /// Setelah `caddy trust` sukses. Disimpan bukan sebagai bukti live, tapi
-    /// sebagai riwayat yang UI pakai untuk menampilkan statusnya.
+    /// After `caddy trust` succeeds. Stored not as live proof but
+    /// as history the UI uses to show the status.
     pub fn mark_https_trusted(&mut self) -> Result<()> {
         self.config.https_trusted = true;
         self.config.save(&self.paths)?;
         Ok(())
     }
 
-    /// First-run ditutup, baik karena selesai maupun dilewati. Disimpan di
-    /// config supaya panel panduan tidak muncul lagi di peluncuran berikutnya.
+    /// First run closed, whether finished or skipped. Stored in
+    /// config so the guide panel does not appear on the next launch.
     pub fn mark_onboarded(&mut self) -> Result<()> {
         if self.config.onboarded {
             return Ok(());
@@ -1013,10 +1013,10 @@ impl Session {
         Ok(serde_json::to_string_pretty(&self.config)?)
     }
 
-    /// Impor config dari mesin lain. Bagian yang terikat mesin ini tidak ikut
-    /// disalin mentah: kepercayaan CA tetap milik mesin ini, folder project
-    /// yang tidak ada dilewati, dan situs dengan PHP belum terpasang dibuat
-    /// nonaktif supaya pool tidak gagal dinyalakan.
+    /// Import config from another machine. Parts bound to this machine are not
+    /// copied verbatim: CA trust stays with this machine, project folders
+    /// that are missing are skipped, and sites with uninstalled PHP are made
+    /// inactive so the pool does not fail to start.
     pub async fn import_config(&mut self, text: &str) -> Result<ImportReport> {
         let mut next: Config = serde_json::from_str(text).context("config tidak valid")?;
         let installed = crate::php::PhpManager::new(self.paths.clone()).installed();
@@ -1064,9 +1064,9 @@ impl Session {
         })
     }
 
-    /// Setelah config berubah: nyalakan versi PHP yang baru dipakai, matikan
-    /// yang tidak lagi dipakai, lalu reload Caddy dan Apache. Kalau runtime
-    /// mati, cukup simpan config.
+    /// After config changes: start the newly used PHP version, stop
+    /// the one no longer used, then reload Caddy and Apache. If the runtime
+    /// is down, saving the config is enough.
     pub(crate) async fn refresh(&mut self) -> Result<()> {
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(());
@@ -1139,8 +1139,8 @@ fn folder_name(path: &Path) -> String {
         .to_string()
 }
 
-/// Windows kadang masih memegang handle sebentar setelah proses mati, jadi
-/// penghapusan dicoba beberapa kali sebelum menyerah.
+/// Windows sometimes holds a handle briefly after a process dies, so
+/// deletion is retried a few times before giving up.
 fn remove_php_dir(paths: &Paths, version: &str) -> Result<()> {
     remove_dir_retry(&paths.php_dir(version))
 }
@@ -1167,7 +1167,7 @@ fn remove_dir_retry(dir: &Path) -> Result<()> {
     Err(anyhow::Error::from(err)).with_context(|| format!("gagal menghapus {}", dir.display()))
 }
 
-/// Nama berkas backup memakai waktu lokal mesin, bukan UTC, supaya mudah dicari.
+/// Backup file names use the machine's local time, not UTC, so they are easy to find.
 #[cfg(windows)]
 fn timestamp() -> String {
     use windows::Win32::Foundation::SYSTEMTIME;
@@ -1189,8 +1189,8 @@ fn timestamp() -> String {
     secs.to_string()
 }
 
-/// Id dipakai sebagai nama file log dan bagian domain, jadi dibatasi ke huruf,
-/// angka, dan tanda hubung.
+/// The id is used as a log file name and a domain part, so it is limited to letters,
+/// digits, and hyphens.
 pub fn slug(input: &str) -> String {
     let mut out = String::new();
     let mut last_dash = false;

@@ -401,8 +401,8 @@ const workspaceTitle = computed(() =>
   border-color: var(--accent);
 }
 
-/* Titlebar sudah penuh di lebar minimum 780px, jadi label dilepas lebih dulu
-   dan tombolnya tetap bisa dipakai lewat ikon serta tooltip. */
+/* The titlebar is already full at the 780px minimum width, so the label is dropped first
+   and the button stays usable through its icon and tooltip. */
 @media (max-width: 900px) {
   .workspace-label {
     display: none;

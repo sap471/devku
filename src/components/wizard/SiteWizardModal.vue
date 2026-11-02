@@ -49,7 +49,7 @@ async function pickFolder() {
       title: "Pilih folder project PHP",
       multiple: false,
       directory: true,
-      // Workspace hanya titik awal; folder project tetap bebas di mana saja.
+      // The workspace is only a starting point; the project folder stays free anywhere.
       defaultPath: workspace?.exists ? workspace.path : undefined,
     });
     if (typeof selected === "string") {

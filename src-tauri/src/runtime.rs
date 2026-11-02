@@ -15,20 +15,20 @@ use crate::proc::{ServiceSpec, ServiceState, Supervisor};
 
 pub const PHP_PORT_START: u16 = 9001;
 
-/// Sekumpulan proses yang sedang melayani config tertentu. Drop = matikan semua,
-/// jadi tidak ada jalur di mana php-cgi tertinggal hidup.
+/// The set of processes currently serving a given config. Drop = shut everything down,
+/// so there is no path where php-cgi is left running.
 pub struct Runtime {
     ports: BTreeMap<String, u16>,
     php: Vec<(String, Supervisor)>,
     caddy: Option<Supervisor>,
     apache: Option<Supervisor>,
-    /// httpd.conf terakhir yang dipakai proses Apache yang hidup. Dipakai
-    /// untuk menghindari restart saat config tidak berubah.
+    /// Last httpd.conf used by the live Apache process. Used
+    /// to avoid a restart when the config has not changed.
     apache_config: Option<String>,
     apache_error: Option<String>,
     database: Option<Supervisor>,
-    /// Database terpasang dan datadir-nya sudah siap, jadi layak ditampilkan
-    /// sebagai service meski sedang berhenti.
+    /// The database is installed and its datadir is ready, so it is worth showing
+    /// as a service even while it is stopped.
     database_present: bool,
     database_error: Option<String>,
 }
@@ -40,8 +40,8 @@ impl Runtime {
         paths.ensure()?;
         config.validate()?;
 
-        // Tanpa site pun runtime tetap berguna: Caddy menyajikan dasbor di
-        // port 80, jadi user melihat sesuatu alih-alih koneksi ditolak.
+        // The runtime is useful even with no sites: Caddy serves the dashboard on
+        // port 80, so the user sees something instead of a refused connection.
         let versions = config.php_versions_in_use();
 
         let allocation = ports::allocate(&versions, PHP_PORT_START)?;
@@ -67,8 +67,8 @@ impl Runtime {
                 .ensure_database(config.database.port, &paths, hook.clone())
                 .await
         {
-            // Database tidak menghalangi situs: kegagalan dicatat, service
-            // lain tetap menyala.
+            // The database never blocks sites: failures are recorded and other
+            // services keep running.
             runtime.database_error = Some(format!("{err:#}"));
         }
 
@@ -81,9 +81,9 @@ impl Runtime {
         let backend = CaddyBackend::new(paths.clone());
         backend.write_config(config, &runtime.ports).await?;
 
-        // Apache dulu supaya Caddy yang meneruskan ke port internalnya tidak
-        // menabrak backend yang belum siap. Kegagalannya dicatat seperti
-        // database: situs Caddy tetap jalan, UI menunjukkan service yang gagal.
+        // Apache first so Caddy, which forwards to its internal port, does not
+        // hit a backend that is not ready. Its failure is recorded like the
+        // database: Caddy sites keep running and the UI shows the failed service.
         if let Err(err) = runtime.apply_apache(config, &paths, hook.clone()).await {
             runtime.apache_error = Some(format!("{err:#}"));
         }
@@ -100,8 +100,8 @@ impl Runtime {
         Ok(runtime)
     }
 
-    /// Menyalakan pool untuk satu versi kalau belum ada. Dipakai saat site baru
-    /// memakai versi PHP yang belum berjalan; versi lain tidak terganggu.
+    /// Starts the pool for one version if it is not running yet. Used when a new site
+    /// uses a PHP version that is not running; other versions are untouched.
     pub async fn ensure_version(
         &mut self,
         version: &str,
@@ -132,9 +132,9 @@ impl Runtime {
         Ok(port)
     }
 
-    /// Nyalakan, matikan, atau mulai ulang httpd sesuai config. Restart hanya
-    /// dilakukan kalau httpd.conf yang dihasilkan berubah, karena Apache tidak
-    /// punya admin API seperti Caddy.
+    /// Starts, stops, or restarts httpd to match the config. A restart is only
+    /// performed when the generated httpd.conf changed, because Apache has no
+    /// admin API like Caddy's.
     pub async fn apply_apache(
         &mut self,
         config: &Config,
@@ -179,7 +179,7 @@ impl Runtime {
         self.apache_error = None;
     }
 
-    /// Hentikan pool yang tidak lagi dipakai site mana pun.
+    /// Stops a pool that no site uses anymore.
     pub async fn stop_unused(&mut self, in_use: &BTreeSet<String>) -> Result<()> {
         let mut keep = Vec::new();
         let mut stop = Vec::new();
@@ -200,9 +200,9 @@ impl Runtime {
         Ok(())
     }
 
-    /// Menyalakan ulang satu pool di port yang sama. Dipakai setelah php.ini
-    /// diedit: php-cgi hanya membaca konfigurasi saat prosesnya dimulai, dan
-    /// port yang tidak berubah berarti Caddy tidak perlu di-reload.
+    /// Restarts one pool on the same port. Used after php.ini
+    /// is edited: php-cgi only reads configuration at process start, and an
+    /// unchanged port means Caddy does not need a reload.
     pub async fn restart_version(
         &mut self,
         version: &str,
@@ -241,8 +241,8 @@ impl Runtime {
         Ok(port)
     }
 
-    /// Menyalakan database di port yang diminta. Port yang bentrok dilaporkan
-    /// apa adanya, bukan digeser diam-diam, supaya `.env` tidak rusak sendiri.
+    /// Starts the database on the requested port. A conflicting port is reported
+    /// as is rather than silently shifted, so `.env` does not break on its own.
     pub async fn ensure_database(
         &mut self,
         port: u16,
@@ -263,7 +263,7 @@ impl Runtime {
         Ok(port)
     }
 
-    /// Menjalankan spec database apa adanya, termasuk spec pemulihan password.
+    /// Runs the database spec as is, including the password recovery spec.
     pub async fn start_database_spec(
         &mut self,
         spec: ServiceSpec,
@@ -291,7 +291,7 @@ impl Runtime {
         self.database.is_some()
     }
 
-    /// Reload config tanpa mematikan apa pun.
+    /// Reloads config without stopping anything.
     pub async fn reload(&self, config: &Config, paths: Paths) -> Result<u16> {
         let backend = CaddyBackend::new(paths);
         backend.reload(config, &self.ports).await

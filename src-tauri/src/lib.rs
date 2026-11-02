@@ -41,7 +41,7 @@ pub fn run() {
         .manage(commands::AppState::new(session))
         .manage(terminal::Terminals::default())
         .manage(download::Slot::default())
-        // Tutup jendela hanya menyembunyikan; stop beneran lewat tray > Keluar.
+        // Closing the window only hides it; stop for real via tray > Keluar.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == "main"
@@ -50,14 +50,14 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        // Service menyala sendiri: membuka DevKu berarti localhost langsung hidup.
+        // Services start on their own: opening DevKu means localhost is up right away.
         .setup(|app| {
             tray::create(app.handle())?;
 
-            // Dibuka oleh Windows saat login: jangan tampilkan jendela, tapi
-            // service tetap dinyalakan supaya tray langsung berguna. Jendela
-            // dibuat tidak terlihat di config, lalu ditampilkan di sini untuk
-            // pemakaian biasa.
+            // Opened by Windows at login: do not show the window, but
+            // still start services so the tray is useful right away. The window
+            // is created hidden in the config, then shown here for
+            // normal use.
             let hidden = std::env::args().any(|arg| arg == autostart::HIDDEN_FLAG);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = if hidden { window.hide() } else { window.show() };
@@ -134,7 +134,7 @@ pub fn run() {
         .expect("error while building DevKu");
 
     app.run(|handle, event| {
-        // Tanpa ini, menutup jendela meninggalkan php-cgi yang memegang port.
+        // Without this, closing the window leaves php-cgi holding the port.
         if let tauri::RunEvent::ExitRequested { .. } = event {
             let state = handle.state::<commands::AppState>();
             tauri::async_runtime::block_on(async {

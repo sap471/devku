@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-/// Satu tombol di panel situs. `command` dikirim apa adanya ke terminal.
+/// One button in the site panel. `command` is sent to the terminal as-is.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct CommandView {
     pub id: String,
@@ -10,8 +10,8 @@ pub struct CommandView {
     pub command: String,
 }
 
-/// Hanya perintah yang penandanya benar-benar ada di folder, jadi tidak ada
-/// tombol yang pasti gagal saat diklik.
+/// Only commands whose marker really exists in the folder, so no
+/// button is guaranteed to fail when clicked.
 pub fn for_site(root: &Path, bun: bool) -> Vec<CommandView> {
     let mut out = Vec::new();
 

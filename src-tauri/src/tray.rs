@@ -4,8 +4,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::AppState;
 
-/// Tray wajib ada supaya buka-tutup jendela tidak lagi sama dengan mematikan
-/// localhost: menutup jendela hanya menyembunyikannya, service tetap jalan.
+/// The tray must exist so opening and closing the window no longer equals killing
+/// localhost: closing the window only hides it, services keep running.
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Buka DevKu", true, None::<&str>)?;
     let start = MenuItem::with_id(app, "start", "Start semua", true, None::<&str>)?;
@@ -30,8 +30,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            // Klik kiri tanpa menu: langsung tampilkan jendela, seperti umumnya
-            // aplikasi tray di Windows.
+            // Left click with no menu: show the window right away, as tray
+            // apps on Windows usually do.
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,

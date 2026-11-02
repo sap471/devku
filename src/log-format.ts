@@ -1,5 +1,5 @@
-/// Satu baris access log Caddy yang sudah diringkas. Header permintaan tidak
-/// ikut ditampilkan karena tidak membantu saat membaca lalu lintas situs.
+/// A single Caddy access log line, already condensed. Request headers are not
+/// shown because they do not help when reading a site's traffic.
 export interface AccessLog {
   date: string;
   time: string;
@@ -10,10 +10,10 @@ export interface AccessLog {
   size: number | null;
 }
 
-/// Baris access log Caddy berbentuk:
+/// A Caddy access log line looks like:
 /// `2026/10/30 17:17:18.161\tINFO\t...\thandled request\t{...json...}`.
-/// Baris lain mengembalikan null dan ditampilkan apa adanya, jadi log PHP atau
-/// pesan Caddy tidak hilang.
+/// Other lines return null and are shown as-is, so PHP logs or
+/// Caddy messages are not lost.
 export function parseAccessLog(line: string): AccessLog | null {
   const marker = "\thandled request\t";
   const at = line.indexOf(marker);

@@ -2,9 +2,9 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-/// Ekstrak zip ke `dest`, membuang satu folder pembungkus kalau semua entri
-/// berada di dalam satu folder yang sama. Paket PHP, Caddy, dan Bun semuanya
-/// memakai bentuk itu, jadi satu jalur ekstraksi cukup untuk ketiganya.
+/// Extract a zip into `dest`, dropping one wrapper folder when all entries
+/// sit inside the same folder. The PHP, Caddy, and Bun packages all
+/// use that shape, so one extraction path is enough for all three.
 pub fn extract(zip_path: &Path, dest: &Path) -> Result<()> {
     std::fs::create_dir_all(dest)?;
 
@@ -49,8 +49,8 @@ pub fn extract(zip_path: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Folder pembungkus hanya dibuang kalau semua berkas benar-benar berada di
-/// dalamnya; zip campuran tetap diekstrak apa adanya.
+/// The wrapper folder is dropped only when every file really sits inside
+/// it; a mixed zip is extracted as-is.
 pub fn common_root(names: &[String]) -> Option<String> {
     let mut roots = names.iter().filter_map(|name| {
         let name = name.trim_start_matches('/');
@@ -62,7 +62,7 @@ pub fn common_root(names: &[String]) -> Option<String> {
         return None;
     }
 
-    // Kalau akarnya sebuah berkas (bukan folder), tidak ada yang dibuang.
+    // If the root is a file (not a folder), nothing is dropped.
     if names
         .iter()
         .all(|name| !name.trim_start_matches('/').contains('/'))
@@ -73,7 +73,7 @@ pub fn common_root(names: &[String]) -> Option<String> {
     Some(first)
 }
 
-/// Menolak entri zip yang mencoba keluar dari folder tujuan.
+/// Rejects zip entries that try to escape the destination folder.
 pub fn safe_join(base: &Path, relative: &str) -> Result<PathBuf> {
     let mut out = base.to_path_buf();
     for part in Path::new(relative).components() {

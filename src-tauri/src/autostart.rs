@@ -2,21 +2,21 @@ use std::path::Path;
 
 use anyhow::Result;
 
-/// Nilai Run milik DevKu. Satu-satunya tempat yang menyuruh Windows membuka
-/// aplikasi saat user login.
+/// DevKu's Run value. The only place that tells Windows to open the
+/// app at user login.
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "DevKu";
-/// Tanpa flag ini jendela akan muncul saat login. Servis tetap dinyalakan
-/// oleh aplikasi, jadi tray langsung aktif.
+/// Without this flag the window shows up at login. Services are still started
+/// by the app, so the tray is active right away.
 pub const HIDDEN_FLAG: &str = "--hidden";
 
-/// Perintah yang ditulis ke registry. Path diberi tanda kutip karena lokasi
-/// Program Files mengandung spasi.
+/// Command written to the registry. The path is quoted because the Program
+/// Files location contains spaces.
 pub fn command_line(exe: &Path) -> String {
     format!("\"{}\" {HIDDEN_FLAG}", exe.display())
 }
 
-/// Isi nilai Run saat ini, kalau ada. Dipakai juga oleh pengujian.
+/// Current Run value contents, if any. Also used by the tests.
 #[cfg(windows)]
 pub fn current() -> Option<String> {
     use winreg::RegKey;
@@ -32,8 +32,8 @@ pub fn current() -> Option<String> {
     None
 }
 
-/// Bandingkan tanpa peduli huruf besar/kecil karena Windows menyimpan path
-/// apa adanya dan bisa mengubah kapitalisasi.
+/// Compare case-insensitively because Windows stores the path as-is and may
+/// change its capitalization.
 pub fn same_command(a: &str, b: &str) -> bool {
     a.trim().eq_ignore_ascii_case(b.trim())
 }
@@ -44,8 +44,8 @@ pub fn is_enabled(exe: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Binary yang sedang berjalan. Di aplikasi ini `devku.exe`, jadi nilai Run
-/// dibandingkan dengan jalur yang benar-benar dipakai sekarang.
+/// Binary that is running now. `devku.exe` in this app, so the Run value is
+/// compared against the path actually in use.
 pub fn running_exe() -> std::path::PathBuf {
     std::env::current_exe().unwrap_or_default()
 }
@@ -90,11 +90,11 @@ mod tests {
         assert!(!same_command(&format!("{line} --other"), &line));
     }
 
-    /// Menulis nilai Run sungguhan, lalu memulihkannya (termasuk menghapus
-    /// kalau sebelumnya tidak ada).
+    /// Writes the real Run value, then restores it (including deleting it
+    /// when it did not exist before).
     #[test]
     #[cfg(windows)]
-    #[ignore = "menulis key Run milik pengguna sungguhan"]
+    #[ignore = "writes the real user's Run key"]
     fn set_then_clear_restores_registry() {
         use winreg::RegKey;
         use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};

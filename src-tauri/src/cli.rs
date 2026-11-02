@@ -14,8 +14,8 @@ use crate::php::PhpManager;
 use crate::proc::ServiceState;
 use crate::runtime::{PHP_PORT_START, Runtime};
 
-/// Hasil dispatch yang tidak bisa dinyatakan dengan `Result`: perintah tak
-/// dikenal bukan kegagalan, tetapi punya exit code sendiri.
+/// Dispatch result that `Result` cannot express: an unknown command is
+/// not a failure, but has its own exit code.
 enum Status {
     Ok,
     UnknownCommand,
@@ -364,8 +364,8 @@ fn parse_seconds(args: &[String]) -> Result<Option<u64>> {
     Ok(None)
 }
 
-/// Cermin panel "Runtime" di UI tanpa membuka jendela: apa yang DevKu lihat
-/// sebagai runtime sistem atau bawaan, lengkap dengan jalurnya.
+/// Mirrors the "Runtime" panel in the UI without opening a window: what DevKu
+/// sees as the system or bundled runtime, paths included.
 fn runtimes() -> Result<()> {
     let paths = Paths::resolve();
     for runtime in crate::runtime_detect::detect(&paths) {
@@ -379,8 +379,8 @@ fn runtimes() -> Result<()> {
     Ok(())
 }
 
-/// Pasang Composer langsung dari CLI. PHP diambil dari PATH lebih dulu, sama
-/// seperti tombol di UI.
+/// Install Composer straight from the CLI. PHP comes from PATH first, the same
+/// as the button in the UI.
 async fn install_composer() -> Result<()> {
     let paths = Paths::resolve();
     let cancel = AtomicBool::new(false);
@@ -406,8 +406,8 @@ async fn install_composer() -> Result<()> {
     Ok(())
 }
 
-/// Kelola folder paket global Composer di PATH pengguna. Tanpa argumen,
-/// tampilkan lokasi dan tool yang terlihat di dalamnya.
+/// Manage the Composer global package folder in the user PATH. Without an
+/// argument, show the location and the tools visible inside it.
 fn composer_path(mode: Option<&str>) -> Result<()> {
     let dir = crate::composer::global_bin_dir();
 
@@ -447,8 +447,8 @@ fn composer_path(mode: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Daftarkan atau lepas DevKu dari startup Windows. Nilai Run menunjuk
-/// `devku.exe` di folder yang sama dengan CLI ini.
+/// Register or remove DevKu from Windows startup. The Run value points at
+/// `devku.exe` in the same folder as this CLI.
 fn autostart(mode: Option<&str>) -> Result<()> {
     let exe = std::env::current_exe()?.with_file_name("devku.exe");
 
@@ -480,7 +480,7 @@ fn autostart(mode: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Tulis config ke berkas supaya bisa dibagikan ke mesin lain.
+/// Write the config to a file so it can be shared with another machine.
 fn export_config(target: &str) -> Result<()> {
     let paths = Paths::resolve();
     let config = Config::load(&paths)?;
@@ -490,8 +490,8 @@ fn export_config(target: &str) -> Result<()> {
     Ok(())
 }
 
-/// Impor config dari berkas. Folder project yang tidak ada di mesin ini
-/// dilewati, dan situs dengan PHP belum terpasang dibuat nonaktif.
+/// Import a config from a file. Project folders missing on this machine are
+/// skipped, and sites whose PHP is not installed yet are disabled.
 async fn import_config(source: &str) -> Result<()> {
     let text =
         std::fs::read_to_string(source).with_context(|| format!("gagal membaca {source}"))?;
@@ -515,8 +515,8 @@ async fn import_config(source: &str) -> Result<()> {
     Ok(())
 }
 
-/// Pasang CA lokal Caddy ke trust store, langsung dari CLI. Caddy harus
-/// berjalan (admin API hidup) seperti tombol UI menjalankannya.
+/// Install the local Caddy CA into the trust store, straight from the CLI.
+/// Caddy must be running (admin API up) the way the UI button runs it.
 async fn trust() -> Result<()> {
     let paths = Paths::resolve();
     let backend = CaddyBackend::new(paths.clone());

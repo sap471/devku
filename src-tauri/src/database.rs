@@ -5,14 +5,14 @@ use anyhow::{Context, Result, bail};
 use crate::paths::Paths;
 use crate::proc::ServiceSpec;
 
-/// Versi yang dipatok. 11.4 adalah LTS dengan masa dukung terpanjang dan
-/// kompatibilitas paling lebar untuk tooling PHP.
+/// The pinned version. 11.4 is the LTS with the longest support window and
+/// the widest compatibility for PHP tooling.
 pub const VERSION: &str = "11.4.13";
 
 const MIRROR: &str = "https://archive.mariadb.org";
 
-/// Skema sistem yang tidak ikut dibackup: memulihkannya ke instalasi baru
-/// justru membuat konflik hak akses.
+/// System schemas left out of backups: restoring them into a new install
+/// would only create privilege conflicts.
 const SYSTEM_SCHEMAS: &[&str] = &["mysql", "performance_schema", "information_schema", "sys"];
 
 pub fn archive_name(version: &str) -> String {
@@ -30,8 +30,8 @@ pub fn checksums_url(version: &str) -> String {
     format!("{MIRROR}/mariadb-{version}/winx64-packages/sha256sums.txt")
 }
 
-/// Kontrak server database lokal. MariaDB satu-satunya implementasi sekarang;
-/// PostgreSQL nanti cukup menambah implementasi lain tanpa menyentuh pemanggil.
+/// Local database server contract. MariaDB is the only implementation for now;
+/// PostgreSQL later only needs another implementation without touching callers.
 pub trait DatabaseBackend: Send + Sync {
     fn id(&self) -> &'static str;
     fn label(&self) -> &'static str;
@@ -40,23 +40,23 @@ pub trait DatabaseBackend: Send + Sync {
     fn data_dir(&self) -> PathBuf;
     fn is_installed(&self) -> bool;
     fn is_initialized(&self) -> bool;
-    /// Menyiapkan datadir kosong. Dipanggil sekali setelah arsip diekstrak.
+    /// Prepares an empty datadir. Called once after the archive is extracted.
     fn initialize(&self, port: u16) -> Result<()>;
-    /// Service normal.
+    /// Normal service.
     fn spec(&self, port: u16) -> Result<ServiceSpec>;
-    /// Service dengan grant table dimatikan, untuk memulihkan password yang
-    /// sudah tidak diketahui.
+    /// Service with the grant table disabled, to recover a password that is
+    /// no longer known.
     fn recovery_spec(&self, port: u16) -> Result<ServiceSpec>;
     fn password(&self) -> String;
     fn store_password(&self, password: &str) -> Result<()>;
     fn query(&self, port: u16, password: &str, sql: &str) -> Result<String>;
     fn root_hosts(&self, port: u16, password: &str) -> Result<Vec<String>>;
-    /// Mengubah password di semua akun root sekaligus. Mengubah satu baris saja
-    /// tidak berpengaruh ke login TCP, karena `127.0.0.1` cocok ke akun sendiri.
+    /// Changes the password on every root account at once. Changing a single row
+    /// does not affect TCP login, because `127.0.0.1` matches its own account row.
     fn set_password(&self, port: u16, current: &str, target: &str) -> Result<()>;
     fn user_databases(&self, port: u16, password: &str) -> Result<Vec<String>>;
     fn dump(&self, port: u16, password: &str, dest: &Path) -> Result<()>;
-    /// Membuang isi datadir.
+    /// Empties the datadir.
     fn wipe(&self) -> Result<()>;
 }
 
@@ -81,14 +81,14 @@ impl Mariadb {
         value.replace('\'', "''")
     }
 
-    /// Akun root yang benar-benar bisa dipakai. Server berjalan dengan
-    /// `skip-name-resolve`, jadi baris ber-host nama mesin diabaikan dan
-    /// `ALTER USER` untuknya gagal dengan ERROR 1396.
+    /// The root account that actually works. The server runs with
+    /// `skip-name-resolve`, so rows hosted by the machine name are ignored and
+    /// `ALTER USER` on them fails with ERROR 1396.
     fn usable_root_host(host: &str) -> bool {
         host == "localhost" || host == "%" || host.parse::<std::net::IpAddr>().is_ok()
     }
 
-    /// Pesan galat klien memuat peringatan passwordless yang bukan kesalahan.
+    /// The client error message carries a passwordless warning that is not a failure.
     fn clean_error(stderr: &str) -> String {
         stderr
             .lines()
@@ -99,9 +99,9 @@ impl Mariadb {
             .to_string()
     }
 
-    /// Alamat bind untuk `my.ini`. Loopback IPv6 ikut hanya kalau tumpukan
-    /// IPv6 memang bisa dipakai: mendaftarkannya di mesin tanpa IPv6 membuat
-    /// mysqld gagal bind dan database tidak pernah menyala.
+    /// Bind addresses for `my.ini`. IPv6 loopback is included only when the
+    /// IPv6 stack is usable: registering it on a machine without IPv6 makes
+    /// mysqld fail to bind and the database never starts.
     fn bind_addresses() -> &'static str {
         if std::net::TcpListener::bind(("::1", 0)).is_ok() {
             "127.0.0.1,::1"
@@ -110,17 +110,17 @@ impl Mariadb {
         }
     }
 
-    /// Berkas konfigurasi milik DevKu. `my.ini` yang ditinggalkan penginisialisasi
-    /// memuat jalur absolut ke folder saat itu, jadi tidak dipakai.
+    /// The config file owned by DevKu. The `my.ini` left by the initializer
+    /// holds absolute paths to that moment's folder, so it is not used.
     fn write_config(&self, port: u16) -> Result<PathBuf> {
         let file = self.paths.mariadb_config();
         let base = self.base_dir();
-        // Dua alamat loopback, bukan hanya IPv4: di Windows `localhost`
-        // dijawab AAAA lebih dulu, jadi klien mencoba ::1 dulu. Tanpa
-        // listener di ::1, percobaan itu menggantung sekitar 2 detik baru
-        // jatuh ke 127.0.0.1 — WordPress dengan DB_HOST=localhost jadi lambat.
-        // Catatan: akun yang di-grant hanya untuk 127.0.0.1 tidak otomatis
-        // cocok dari ::1; beri grant ::1 atau '%' seperti akun root DevKu.
+        // Two loopback addresses, not just IPv4: on Windows `localhost`
+        // is answered by AAAA first, so clients try ::1 first. Without a
+        // listener on ::1 that attempt hangs for about 2 seconds before
+        // falling back to 127.0.0.1, which makes WordPress with DB_HOST=localhost slow.
+        // Note: an account granted only for 127.0.0.1 does not automatically
+        // match from ::1; grant ::1 or '%' like the DevKu root account.
         let text = format!(
             "[mysqld]\n\
              basedir={base}\n\
@@ -189,7 +189,7 @@ impl DatabaseBackend for Mariadb {
     }
 
     fn is_installed(&self) -> bool {
-        // server.dll wajib ada di samping stub mysqld.exe.
+        // server.dll must sit next to the mysqld.exe stub.
         self.binary("mysqld.exe").exists() && self.binary("server.dll").exists()
     }
 
@@ -220,7 +220,7 @@ impl DatabaseBackend for Mariadb {
             bail!("gagal menyiapkan datadir: {}", detail.trim());
         }
 
-        // Sisa my.ini dari penginisialisasi tidak dipakai; DevKu menulis sendiri.
+        // The initializer's leftover my.ini is unused; DevKu writes its own.
         let _ = std::fs::remove_file(data.join("my.ini"));
         self.write_config(port)?;
         Ok(())
@@ -411,8 +411,8 @@ mod tests {
         let file = backend.write_config(3306).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
 
-        // `localhost` mencoba ::1 lebih dulu; listener IPv6 mencegah jeda
-        // sekitar 2 detik sebelum klien jatuh ke 127.0.0.1.
+        // `localhost` tries ::1 first; the IPv6 listener prevents the roughly
+        // 2 second delay before the client falls back to 127.0.0.1.
         assert!(text.contains(&format!("bind-address={}", Mariadb::bind_addresses())));
         assert!(text.contains("port=3306"));
         assert!(text.contains("skip-name-resolve"));
