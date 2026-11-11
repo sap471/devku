@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Backend, Config, Site};
-use crate::database::{DatabaseBackend, Mariadb};
+use crate::database::{Conn, DatabaseBackend, Mariadb};
 use crate::detect;
 use crate::paths::Paths;
 use crate::proc::ServiceState;
@@ -355,7 +355,7 @@ impl Session {
             .map(|item| (item.status.clone(), item.detail.clone()));
 
         let database = DatabaseView {
-            engine: database_backend.id().to_string(),
+            engine: database_backend.engine().key().to_string(),
             label: database_backend.label().to_string(),
             version: database_backend.version().to_string(),
             installed: database_backend.is_installed(),
@@ -957,7 +957,7 @@ impl Session {
 
             let result = backend.set_password(port, "", password);
 
-            if let Ok(spec) = backend.spec(port) {
+            if let Ok(Some(spec)) = backend.spec(port) {
                 let hook = self.hook.clone();
                 let _ = self
                     .runtime
@@ -1001,9 +1001,17 @@ impl Session {
             .join(format!("mariadb-{}.sql", timestamp()));
         let target = dest.clone();
 
-        tokio::task::spawn_blocking(move || backend.dump(port, &password, &target))
-            .await
-            .map_err(|err| anyhow::anyhow!("backup terhenti: {err}"))??;
+        tokio::task::spawn_blocking(move || {
+            let conn = Conn {
+                host: "127.0.0.1".to_string(),
+                port,
+                user: "root".to_string(),
+                secret: password,
+            };
+            backend.dump(&conn, &target)
+        })
+        .await
+        .map_err(|err| anyhow::anyhow!("backup terhenti: {err}"))??;
 
         Ok(dest)
     }

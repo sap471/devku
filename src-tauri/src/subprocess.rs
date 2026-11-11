@@ -32,3 +32,44 @@ pub fn run_hidden(
         .output()
         .map_err(|err| anyhow::anyhow!("gagal menjalankan {}: {err}", program.display()))
 }
+
+/// Same as `run_hidden`, but feeds a file into the child's stdin. Used to
+/// restore a dump: the client reads the SQL stream itself, so no shell
+/// redirection is needed and the file never has to be quoted.
+pub fn run_hidden_with_stdin(
+    program: &std::path::Path,
+    args: &[String],
+    cwd: Option<&std::path::Path>,
+    mut input: std::fs::File,
+) -> anyhow::Result<std::process::Output> {
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    command.stdin(std::process::Stdio::piped());
+    hide_console_std(&mut command);
+
+    let mut child = command
+        .spawn()
+        .map_err(|err| anyhow::anyhow!("gagal menjalankan {}: {err}", program.display()))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("stdin {} tidak tersedia", program.display()))?;
+    let written = std::io::copy(&mut input, &mut stdin)?;
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .map_err(|err| anyhow::anyhow!("gagal menunggu {}: {err}", program.display()))?;
+
+    // A client that exits before reading everything leaves the pipe broken;
+    // that is a real failure and must not be reported as success.
+    if written == 0 && input.metadata().map(|m| m.len()).unwrap_or(0) > 0 {
+        anyhow::bail!("{} tidak membaca input", program.display());
+    }
+
+    Ok(output)
+}

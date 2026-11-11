@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 
 use crate::paths::Paths;
 use crate::proc::ServiceSpec;
@@ -30,10 +31,43 @@ pub fn checksums_url(version: &str) -> String {
     format!("{MIRROR}/mariadb-{version}/winx64-packages/sha256sums.txt")
 }
 
-/// Local database server contract. MariaDB is the only implementation for now;
-/// PostgreSQL later only needs another implementation without touching callers.
+/// Engine names as they appear in `config.json`. `Mysql` shares the MariaDB
+/// driver but is a separate choice: the two cannot run together.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseEngine {
+    #[default]
+    Mariadb,
+    Mysql,
+    Postgres,
+}
+
+impl DatabaseEngine {
+    /// The folder name under `engines/database` and `databases`.
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::Mariadb => "mariadb",
+            Self::Mysql => "mysql",
+            Self::Postgres => "postgres",
+        }
+    }
+}
+
+/// Everything needed to reach a running server. The user is part of it because
+/// PostgreSQL roles are not `user@host` accounts.
+pub struct Conn {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub secret: String,
+}
+
+/// Local database server contract, shared by every engine. Engine-specific
+/// behaviour (MariaDB's root accounts, PostgreSQL's roles) lives on the
+/// implementation instead of here, so a second engine does not have to fake
+/// a model it does not have.
 pub trait DatabaseBackend: Send + Sync {
-    fn id(&self) -> &'static str;
+    fn engine(&self) -> DatabaseEngine;
     fn label(&self) -> &'static str;
     fn version(&self) -> &'static str;
     fn bin_dir(&self) -> PathBuf;
@@ -42,20 +76,15 @@ pub trait DatabaseBackend: Send + Sync {
     fn is_initialized(&self) -> bool;
     /// Prepares an empty datadir. Called once after the archive is extracted.
     fn initialize(&self, port: u16) -> Result<()>;
-    /// Normal service.
-    fn spec(&self, port: u16) -> Result<ServiceSpec>;
-    /// Service with the grant table disabled, to recover a password that is
-    /// no longer known.
-    fn recovery_spec(&self, port: u16) -> Result<ServiceSpec>;
-    fn password(&self) -> String;
-    fn store_password(&self, password: &str) -> Result<()>;
-    fn query(&self, port: u16, password: &str, sql: &str) -> Result<String>;
-    fn root_hosts(&self, port: u16, password: &str) -> Result<Vec<String>>;
-    /// Changes the password on every root account at once. Changing a single row
-    /// does not affect TCP login, because `127.0.0.1` matches its own account row.
-    fn set_password(&self, port: u16, current: &str, target: &str) -> Result<()>;
-    fn user_databases(&self, port: u16, password: &str) -> Result<Vec<String>>;
-    fn dump(&self, port: u16, password: &str, dest: &Path) -> Result<()>;
+    /// False when the engine is a plain file and spawns nothing.
+    fn has_server(&self) -> bool;
+    /// The process to supervise, or None for a serverless engine.
+    fn spec(&self, port: u16) -> Result<Option<ServiceSpec>>;
+    fn query(&self, conn: &Conn, sql: &str) -> Result<String>;
+    fn user_databases(&self, conn: &Conn) -> Result<Vec<String>>;
+    fn system_schemas(&self) -> &'static [&'static str];
+    fn dump(&self, conn: &Conn, dest: &Path) -> Result<()>;
+    fn restore(&self, conn: &Conn, src: &Path) -> Result<()>;
     /// Empties the datadir.
     fn wipe(&self) -> Result<()>;
 }
@@ -168,8 +197,8 @@ impl Mariadb {
 }
 
 impl DatabaseBackend for Mariadb {
-    fn id(&self) -> &'static str {
-        "mariadb"
+    fn engine(&self) -> DatabaseEngine {
+        DatabaseEngine::Mariadb
     }
 
     fn label(&self) -> &'static str {
@@ -226,84 +255,19 @@ impl DatabaseBackend for Mariadb {
         Ok(())
     }
 
-    fn spec(&self, port: u16) -> Result<ServiceSpec> {
-        self.spec_with(port, true)
+    fn has_server(&self) -> bool {
+        true
     }
 
-    fn recovery_spec(&self, port: u16) -> Result<ServiceSpec> {
-        self.spec_with(port, false)
+    fn spec(&self, port: u16) -> Result<Option<ServiceSpec>> {
+        Ok(Some(self.spec_with(port, true)?))
     }
 
-    fn password(&self) -> String {
-        std::fs::read_to_string(self.paths.mariadb_password())
-            .map(|text| text.trim_end_matches(['\r', '\n']).to_string())
-            .unwrap_or_default()
+    fn query(&self, conn: &Conn, sql: &str) -> Result<String> {
+        self.run_query(&conn.host, conn.port, &conn.user, &conn.secret, sql)
     }
 
-    fn store_password(&self, password: &str) -> Result<()> {
-        crate::paths::write_atomic(&self.paths.mariadb_password(), password)
-    }
-
-    fn query(&self, port: u16, password: &str, sql: &str) -> Result<String> {
-        let output = crate::subprocess::run_hidden(
-            &self.binary("mariadb.exe"),
-            &[
-                "--host=127.0.0.1".to_string(),
-                format!("--port={port}"),
-                "--user=root".to_string(),
-                format!("--password={password}"),
-                "--connect-timeout=5".to_string(),
-                "--batch".to_string(),
-                "--skip-column-names".to_string(),
-                format!("--execute={sql}"),
-            ],
-            None,
-        )?;
-
-        if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr);
-            bail!("{}", Self::clean_error(&detail));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    fn root_hosts(&self, port: u16, password: &str) -> Result<Vec<String>> {
-        let text = self.query(
-            port,
-            password,
-            "SELECT host FROM mysql.user WHERE user='root'",
-        )?;
-        let hosts: Vec<String> = text
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .filter(|line| Self::usable_root_host(line))
-            .collect();
-        if hosts.is_empty() {
-            bail!("tidak ada akun root yang bisa dipakai");
-        }
-        Ok(hosts)
-    }
-
-    fn set_password(&self, port: u16, current: &str, target: &str) -> Result<()> {
-        let hosts = self.root_hosts(port, current)?;
-        let value = Self::sql_literal(target);
-
-        let mut sql = String::from("FLUSH PRIVILEGES; ");
-        for host in hosts {
-            sql.push_str(&format!(
-                "ALTER USER 'root'@'{}' IDENTIFIED BY '{}'; ",
-                Self::sql_literal(&host),
-                value
-            ));
-        }
-
-        self.query(port, current, &sql)?;
-        Ok(())
-    }
-
-    fn user_databases(&self, port: u16, password: &str) -> Result<Vec<String>> {
+    fn user_databases(&self, conn: &Conn) -> Result<Vec<String>> {
         let filter = SYSTEM_SCHEMAS
             .iter()
             .map(|name| format!("'{name}'"))
@@ -312,7 +276,7 @@ impl DatabaseBackend for Mariadb {
         let sql = format!(
             "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ({filter}) ORDER BY schema_name"
         );
-        let text = self.query(port, password, &sql)?;
+        let text = self.query(conn, &sql)?;
         Ok(text
             .lines()
             .map(|line| line.trim().to_string())
@@ -320,12 +284,16 @@ impl DatabaseBackend for Mariadb {
             .collect())
     }
 
-    fn dump(&self, port: u16, password: &str, dest: &Path) -> Result<()> {
+    fn system_schemas(&self) -> &'static [&'static str] {
+        SYSTEM_SCHEMAS
+    }
+
+    fn dump(&self, conn: &Conn, dest: &Path) -> Result<()> {
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let databases = self.user_databases(port, password)?;
+        let databases = self.user_databases(conn)?;
         if databases.is_empty() {
             std::fs::write(
                 dest,
@@ -335,10 +303,10 @@ impl DatabaseBackend for Mariadb {
         }
 
         let mut args = vec![
-            "--host=127.0.0.1".to_string(),
-            format!("--port={port}"),
-            "--user=root".to_string(),
-            format!("--password={password}"),
+            format!("--host={}", conn.host),
+            format!("--port={}", conn.port),
+            format!("--user={}", conn.user),
+            format!("--password={}", conn.secret),
             "--default-character-set=utf8mb4".to_string(),
             "--single-transaction".to_string(),
             "--routines".to_string(),
@@ -352,6 +320,34 @@ impl DatabaseBackend for Mariadb {
         if !output.status.success() {
             let detail = String::from_utf8_lossy(&output.stderr);
             bail!("backup gagal: {}", Self::clean_error(&detail));
+        }
+        Ok(())
+    }
+
+    fn restore(&self, conn: &Conn, src: &Path) -> Result<()> {
+        if !src.exists() {
+            bail!("berkas backup tidak ditemukan: {}", src.display());
+        }
+
+        let file =
+            std::fs::File::open(src).with_context(|| format!("gagal membuka {}", src.display()))?;
+        let output = crate::subprocess::run_hidden_with_stdin(
+            &self.binary("mariadb.exe"),
+            &[
+                format!("--host={}", conn.host),
+                format!("--port={}", conn.port),
+                format!("--user={}", conn.user),
+                format!("--password={}", conn.secret),
+                // The client defaults to latin1, which would corrupt the
+                // multibyte data the dump was written with.
+                "--default-character-set=utf8mb4".to_string(),
+            ],
+            Some(&self.paths.mariadb_bin()),
+            file,
+        )?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            bail!("restore gagal: {}", Self::clean_error(&detail));
         }
         Ok(())
     }
@@ -377,6 +373,96 @@ impl DatabaseBackend for Mariadb {
 
         let err = last.expect("setiap percobaan mengisi galat terakhir");
         Err(anyhow::Error::from(err)).with_context(|| format!("gagal menghapus {}", dir.display()))
+    }
+}
+
+/// The MySQL account model: root rows in `mysql.user`, one per host. These
+/// stay off the shared trait because PostgreSQL has roles, not `user@host`.
+impl Mariadb {
+    /// Service with the grant table disabled, to recover a password that is
+    /// no longer known.
+    pub fn recovery_spec(&self, port: u16) -> Result<ServiceSpec> {
+        self.spec_with(port, false)
+    }
+
+    pub fn password(&self) -> String {
+        std::fs::read_to_string(self.paths.mariadb_password())
+            .map(|text| text.trim_end_matches(['\r', '\n']).to_string())
+            .unwrap_or_default()
+    }
+
+    pub fn store_password(&self, password: &str) -> Result<()> {
+        crate::paths::write_atomic(&self.paths.mariadb_password(), password)
+    }
+
+    fn run_query(
+        &self,
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+        sql: &str,
+    ) -> Result<String> {
+        let output = crate::subprocess::run_hidden(
+            &self.binary("mariadb.exe"),
+            &[
+                format!("--host={host}"),
+                format!("--port={port}"),
+                format!("--user={user}"),
+                format!("--password={password}"),
+                "--connect-timeout=5".to_string(),
+                "--batch".to_string(),
+                "--skip-column-names".to_string(),
+                format!("--execute={sql}"),
+            ],
+            None,
+        )?;
+
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            bail!("{}", Self::clean_error(&detail));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    pub fn root_hosts(&self, port: u16, password: &str) -> Result<Vec<String>> {
+        let text = self.run_query(
+            "127.0.0.1",
+            port,
+            "root",
+            password,
+            "SELECT host FROM mysql.user WHERE user='root'",
+        )?;
+        let hosts: Vec<String> = text
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .filter(|line| Self::usable_root_host(line))
+            .collect();
+        if hosts.is_empty() {
+            bail!("tidak ada akun root yang bisa dipakai");
+        }
+        Ok(hosts)
+    }
+
+    /// Changes the password on every root account at once. Changing a single row
+    /// does not affect TCP login, because `127.0.0.1` matches its own account row.
+    pub fn set_password(&self, port: u16, current: &str, target: &str) -> Result<()> {
+        let hosts = self.root_hosts(port, current)?;
+        let value = Self::sql_literal(target);
+
+        let mut sql = String::from("FLUSH PRIVILEGES; ");
+        for host in hosts {
+            sql.push_str(&format!(
+                "ALTER USER 'root'@'{}' IDENTIFIED BY '{}'; ",
+                Self::sql_literal(&host),
+                value
+            ));
+        }
+
+        self.run_query("127.0.0.1", port, "root", current, &sql)?;
+        Ok(())
     }
 }
 
@@ -441,5 +527,16 @@ mod tests {
         for name in ["mysql", "performance_schema", "information_schema", "sys"] {
             assert!(SYSTEM_SCHEMAS.contains(&name));
         }
+    }
+
+    #[test]
+    fn mariadb_reports_engine_and_has_a_server() {
+        let paths = Paths {
+            root: std::env::temp_dir().join("devku-plan-t1"),
+        };
+        let backend = Mariadb::new(paths);
+        assert_eq!(backend.engine(), DatabaseEngine::Mariadb);
+        assert!(backend.has_server());
+        assert!(backend.system_schemas().contains(&"mysql"));
     }
 }

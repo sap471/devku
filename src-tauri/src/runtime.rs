@@ -257,7 +257,9 @@ impl Runtime {
             anyhow::bail!("port {port} sudah dipakai proses lain");
         }
 
-        let spec = backend.spec(port)?;
+        let spec = backend
+            .spec(port)?
+            .ok_or_else(|| anyhow::anyhow!("database tidak punya proses server"))?;
         self.start_database_spec(spec, hook).await?;
         self.database_present = true;
         Ok(port)
