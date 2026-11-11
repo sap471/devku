@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::database::DatabaseEngine;
+
 /// Default data folder and the home of the custom-location pointer file. The
 /// value never changes even when data moves, so DevKu always knows where
 /// to read the pointer from.
@@ -103,33 +105,36 @@ impl Paths {
         self.apache_dir().join(version)
     }
 
-    pub fn mariadb_dir(&self) -> PathBuf {
-        self.engines().join("mariadb")
+    /// One engine's installation, for example `engines/database/mariadb`. The
+    /// extra `database` segment keeps database engines from colliding with a
+    /// web server or runtime that happens to share the name.
+    pub fn database_dir(&self, engine: DatabaseEngine) -> PathBuf {
+        self.engines().join("database").join(engine.key())
     }
 
     /// `bin/` must stay next to `server.dll`: the mysqld stub loads the server
     /// from the same folder.
-    pub fn mariadb_bin(&self) -> PathBuf {
-        self.mariadb_dir().join("bin")
+    pub fn database_bin(&self, engine: DatabaseEngine) -> PathBuf {
+        self.database_dir(engine).join("bin")
     }
 
     /// User data is deliberately separate from `engines/`, so reinstalling binaries
     /// does not touch the database.
-    pub fn mariadb_data(&self) -> PathBuf {
-        self.root.join("databases").join("mariadb")
+    pub fn database_data(&self, engine: DatabaseEngine) -> PathBuf {
+        self.root.join("databases").join(engine.key())
     }
 
-    pub fn mariadb_runtime(&self) -> PathBuf {
-        self.runtime().join("mariadb")
+    pub fn database_runtime(&self, engine: DatabaseEngine) -> PathBuf {
+        self.runtime().join(engine.key())
     }
 
-    pub fn mariadb_config(&self) -> PathBuf {
-        self.mariadb_runtime().join("my.ini")
+    pub fn database_config(&self, engine: DatabaseEngine, file: &str) -> PathBuf {
+        self.database_runtime(engine).join(file)
     }
 
-    /// The root password is stored outside `config.json` so it is not exported along with it.
-    pub fn mariadb_password(&self) -> PathBuf {
-        self.mariadb_runtime().join("root.pass")
+    /// Kept outside `config.json` so it is not exported along with it.
+    pub fn database_secret(&self, engine: DatabaseEngine) -> PathBuf {
+        self.database_runtime(engine).join("root.pass")
     }
 
     pub fn backups(&self) -> PathBuf {
@@ -200,4 +205,47 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     std::fs::write(&tmp, contents).with_context(|| format!("gagal menulis {}", tmp.display()))?;
     std::fs::rename(&tmp, path).with_context(|| format!("gagal memindahkan {}", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::DatabaseEngine;
+
+    #[test]
+    fn database_paths_are_engine_scoped() {
+        let paths = Paths {
+            root: PathBuf::from("R"),
+        };
+        assert!(
+            paths
+                .database_bin(DatabaseEngine::Mariadb)
+                .ends_with("mariadb/bin")
+        );
+        assert!(
+            paths
+                .database_data(DatabaseEngine::Postgres)
+                .ends_with("databases/postgres")
+        );
+        assert_ne!(
+            paths.database_data(DatabaseEngine::Mariadb),
+            paths.database_data(DatabaseEngine::Postgres)
+        );
+    }
+
+    #[test]
+    fn database_runtime_and_secret_stay_under_runtime() {
+        let paths = Paths {
+            root: PathBuf::from("R"),
+        };
+        assert!(
+            paths
+                .database_config(DatabaseEngine::Postgres, "postgresql.conf")
+                .ends_with("runtime/postgres/postgresql.conf")
+        );
+        assert_ne!(
+            paths.database_secret(DatabaseEngine::Mariadb),
+            paths.database_secret(DatabaseEngine::Postgres)
+        );
+    }
 }

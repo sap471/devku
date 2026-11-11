@@ -875,7 +875,7 @@ impl Session {
         }
 
         backend.initialize(self.config.database.port_of(DatabaseEngine::Mariadb))?;
-        if !self.paths.mariadb_password().exists() {
+        if !self.paths.database_secret(DatabaseEngine::Mariadb).exists() {
             backend.store_password("")?;
         }
 
@@ -894,7 +894,7 @@ impl Session {
         // Binaries can arrive without a datadir, for example after the data folder
         // was cleaned. Preparing here keeps the Mulai button working.
         backend.initialize(self.config.database.port_of(DatabaseEngine::Mariadb))?;
-        if !self.paths.mariadb_password().exists() {
+        if !self.paths.database_secret(DatabaseEngine::Mariadb).exists() {
             backend.store_password("")?;
         }
 
@@ -1029,9 +1029,12 @@ impl Session {
             runtime.stop_database().await;
         }
 
-        remove_dir_retry(&self.paths.mariadb_dir())?;
-        let _ = std::fs::remove_file(self.paths.mariadb_password());
-        let _ = std::fs::remove_file(self.paths.mariadb_config());
+        remove_dir_retry(&self.paths.database_dir(DatabaseEngine::Mariadb))?;
+        let _ = std::fs::remove_file(self.paths.database_secret(DatabaseEngine::Mariadb));
+        let _ = std::fs::remove_file(
+            self.paths
+                .database_config(DatabaseEngine::Mariadb, "my.ini"),
+        );
 
         if remove_data {
             backend.wipe()?;

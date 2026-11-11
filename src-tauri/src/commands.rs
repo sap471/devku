@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
+use crate::database::DatabaseEngine;
 use crate::detect;
 use crate::download::{self, PhpRelease};
 use crate::paths::Paths;
@@ -220,9 +221,9 @@ async fn php_path_dirs(state: &State<'_, AppState>) -> Vec<PathBuf> {
     }
 
     // `mariadb` and `mariadb-dump` work directly in the DevKu terminal.
-    let mariadb_bin = paths.mariadb_bin();
-    if mariadb_bin.is_dir() {
-        dirs.push(mariadb_bin);
+    let db_bin = paths.database_bin(DatabaseEngine::Mariadb);
+    if db_bin.is_dir() {
+        dirs.push(db_bin);
     }
 
     dirs
@@ -1025,7 +1026,7 @@ async fn install_database_inner(
     report(app, "mariadb", version, 0, None, "pasang");
 
     // Extraction takes a while: around 300 MB of small files.
-    let dir = paths.mariadb_dir();
+    let dir = paths.database_dir(DatabaseEngine::Mariadb);
     let zip = archive.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         crate::archive::extract(&zip, &dir)?;
@@ -1034,7 +1035,11 @@ async fn install_database_inner(
     .await
     .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
 
-    if !paths.mariadb_bin().join("mysqld.exe").exists() {
+    if !paths
+        .database_bin(DatabaseEngine::Mariadb)
+        .join("mysqld.exe")
+        .exists()
+    {
         anyhow::bail!("zip MariaDB tidak berisi bin/mysqld.exe");
     }
 

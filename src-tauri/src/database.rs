@@ -101,21 +101,31 @@ pub trait DatabaseBackend: Send + Sync {
     fn wipe(&self) -> Result<()>;
 }
 
+/// MariaDB's driver, also used for MySQL: both speak the same protocol, share
+/// the client tools, and differ only by folder and label.
 pub struct Mariadb {
     paths: Paths,
+    engine: DatabaseEngine,
 }
 
 impl Mariadb {
     pub fn new(paths: Paths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            engine: DatabaseEngine::Mariadb,
+        }
+    }
+
+    pub fn for_engine(paths: Paths, engine: DatabaseEngine) -> Self {
+        Self { paths, engine }
     }
 
     fn base_dir(&self) -> PathBuf {
-        self.paths.mariadb_dir()
+        self.paths.database_dir(self.engine)
     }
 
     fn binary(&self, name: &str) -> PathBuf {
-        self.paths.mariadb_bin().join(name)
+        self.paths.database_bin(self.engine).join(name)
     }
 
     fn sql_literal(value: &str) -> String {
@@ -154,7 +164,7 @@ impl Mariadb {
     /// The config file owned by DevKu. The `my.ini` left by the initializer
     /// holds absolute paths to that moment's folder, so it is not used.
     fn write_config(&self, port: u16) -> Result<PathBuf> {
-        let file = self.paths.mariadb_config();
+        let file = self.paths.database_config(self.engine, "my.ini");
         let base = self.base_dir();
         // Two loopback addresses, not just IPv4: on Windows `localhost`
         // is answered by AAAA first, so clients try ::1 first. Without a
@@ -172,7 +182,7 @@ impl Mariadb {
              plugin-dir={base}\\lib\\plugin\n\
              character-sets-dir={base}\\share\\charsets\n",
             base = base.display(),
-            data = self.paths.mariadb_data().display(),
+            data = self.paths.database_data(self.engine).display(),
             bind = Self::bind_addresses(),
         );
         crate::paths::write_atomic(&file, &text)?;
@@ -201,7 +211,7 @@ impl Mariadb {
             program: self.binary("mysqld.exe"),
             args,
             env: Vec::new(),
-            cwd: Some(self.paths.mariadb_bin()),
+            cwd: Some(self.paths.database_bin(self.engine)),
             port: Some(port),
             log_dir: self.paths.logs(),
         })
@@ -210,11 +220,14 @@ impl Mariadb {
 
 impl DatabaseBackend for Mariadb {
     fn engine(&self) -> DatabaseEngine {
-        DatabaseEngine::Mariadb
+        self.engine
     }
 
     fn label(&self) -> &'static str {
-        "MariaDB"
+        match self.engine {
+            DatabaseEngine::Mysql => "MySQL",
+            _ => "MariaDB",
+        }
     }
 
     fn version(&self) -> &'static str {
@@ -222,11 +235,11 @@ impl DatabaseBackend for Mariadb {
     }
 
     fn bin_dir(&self) -> PathBuf {
-        self.paths.mariadb_bin()
+        self.paths.database_bin(self.engine)
     }
 
     fn data_dir(&self) -> PathBuf {
-        self.paths.mariadb_data()
+        self.paths.database_data(self.engine)
     }
 
     fn is_installed(&self) -> bool {
@@ -235,7 +248,7 @@ impl DatabaseBackend for Mariadb {
     }
 
     fn is_initialized(&self) -> bool {
-        self.paths.mariadb_data().join("mysql").is_dir()
+        self.paths.database_data(self.engine).join("mysql").is_dir()
     }
 
     fn initialize(&self, port: u16) -> Result<()> {
@@ -246,14 +259,14 @@ impl DatabaseBackend for Mariadb {
             bail!("MariaDB belum terpasang");
         }
 
-        let data = self.paths.mariadb_data();
+        let data = self.paths.database_data(self.engine);
         std::fs::create_dir_all(&data)
             .with_context(|| format!("gagal membuat {}", data.display()))?;
 
         let output = crate::subprocess::run_hidden(
             &self.binary("mariadb-install-db.exe"),
             &[format!("--datadir={}", data.display())],
-            Some(&self.paths.mariadb_bin()),
+            Some(&self.paths.database_bin(self.engine)),
         )?;
 
         if !self.is_initialized() {
@@ -354,7 +367,7 @@ impl DatabaseBackend for Mariadb {
                 // multibyte data the dump was written with.
                 "--default-character-set=utf8mb4".to_string(),
             ],
-            Some(&self.paths.mariadb_bin()),
+            Some(&self.paths.database_bin(self.engine)),
             file,
         )?;
         if !output.status.success() {
@@ -365,7 +378,7 @@ impl DatabaseBackend for Mariadb {
     }
 
     fn wipe(&self) -> Result<()> {
-        let dir = self.paths.mariadb_data();
+        let dir = self.paths.database_data(self.engine);
         if !dir.exists() {
             return Ok(());
         }
@@ -398,13 +411,13 @@ impl Mariadb {
     }
 
     pub fn password(&self) -> String {
-        std::fs::read_to_string(self.paths.mariadb_password())
+        std::fs::read_to_string(self.paths.database_secret(self.engine))
             .map(|text| text.trim_end_matches(['\r', '\n']).to_string())
             .unwrap_or_default()
     }
 
     pub fn store_password(&self, password: &str) -> Result<()> {
-        crate::paths::write_atomic(&self.paths.mariadb_password(), password)
+        crate::paths::write_atomic(&self.paths.database_secret(self.engine), password)
     }
 
     fn run_query(
@@ -476,6 +489,19 @@ impl Mariadb {
         self.run_query("127.0.0.1", port, "root", current, &sql)?;
         Ok(())
     }
+}
+
+/// Builds the backend for one engine, the same way Caddy and Apache are chosen
+/// by an enum. MySQL has no backend yet, so asking for it returns an error
+/// instead of silently running MariaDB under a different name.
+pub fn backend_for(paths: &Paths, engine: DatabaseEngine) -> Result<Box<dyn DatabaseBackend>> {
+    let backend: Box<dyn DatabaseBackend> = match engine {
+        DatabaseEngine::Mariadb | DatabaseEngine::Mysql => {
+            Box::new(Mariadb::for_engine(paths.clone(), engine))
+        }
+        DatabaseEngine::Postgres => bail!("engine postgres belum tersedia di versi ini"),
+    };
+    Ok(backend)
 }
 
 #[cfg(test)]
@@ -550,5 +576,15 @@ mod tests {
         assert_eq!(backend.engine(), DatabaseEngine::Mariadb);
         assert!(backend.has_server());
         assert!(backend.system_schemas().contains(&"mysql"));
+    }
+
+    #[test]
+    fn backend_for_returns_engine_matching_request() {
+        let paths = Paths {
+            root: std::env::temp_dir().join("devku-plan-t5"),
+        };
+        let backend = backend_for(&paths, DatabaseEngine::Mariadb).unwrap();
+        assert_eq!(backend.engine(), DatabaseEngine::Mariadb);
+        assert!(backend.bin_dir().ends_with("mariadb/bin"));
     }
 }
