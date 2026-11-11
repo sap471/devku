@@ -9,7 +9,7 @@ use crate::detect;
 use crate::download::{self, PhpRelease};
 use crate::paths::Paths;
 use crate::php::PhpManager;
-use crate::session::{ImportReport, PhpExtensionsView, Session, SiteDraft, Snapshot};
+use crate::session::{ImportReport, PhpExtensionsView, Session, SiteDraft, Snapshot, SyncReport};
 
 pub struct AppState {
     /// None means the config failed to load. The UI must show an error, not
@@ -110,6 +110,18 @@ pub async fn add_site(state: State<'_, AppState>, draft: SiteDraft) -> Result<Sn
         .ok_or_else(|| unavailable(&state.boot_error))?;
     session.add_site(draft).await.map_err(error)?;
     Ok(session.snapshot().await)
+}
+
+/// Registers every workspace folder with a detected framework. Returns the
+/// report only; the UI refreshes the snapshot itself, because a scan may
+/// change several sites at once.
+#[tauri::command]
+pub async fn sync_workspace(state: State<'_, AppState>) -> Result<SyncReport, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    session.sync_workspace().await.map_err(error)
 }
 
 #[tauri::command]

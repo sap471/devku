@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { state, selectSite, toggleSite, STATUS_WORD, frameworkLabel } from "../../store/devku";
+import { state, selectSite, toggleSite, syncWorkspace, STATUS_WORD, frameworkLabel } from "../../store/devku";
 import type { SiteView } from "../../types";
 
 const searchQuery = ref("");
@@ -29,12 +29,34 @@ function openWizard() {
     <div class="list-head">
       <div class="head-top">
         <h1 class="pane-title">Situs</h1>
-        <button class="btn btn-add" type="button" @click="openWizard">
-          <svg class="icon-plus" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z"/>
-          </svg>
-          Tambah
-        </button>
+        <div class="head-actions">
+          <!-- Registers framework projects already sitting in the workspace
+               folder, so they do not have to be added one by one. -->
+          <button
+            class="btn btn-sync"
+            type="button"
+            :disabled="state.busy === 'sync-workspace'"
+            :title="`Pindai ${state.snapshot?.workspace.path ?? 'folder workspace'} dan daftarkan project yang terdeteksi`"
+            @click="syncWorkspace"
+          >
+            <svg
+              class="icon-sync"
+              :class="{ spinning: state.busy === 'sync-workspace' }"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path d="M8 3a5 5 0 0 0-4.546 2.914.75.75 0 0 1-1.342-.67A6.5 6.5 0 0 1 13.5 8h.75a.75.75 0 0 1 .53 1.28l-1.5 1.5a.75.75 0 0 1-1.06 0l-1.5-1.5A.75.75 0 0 1 11.25 8h.716A5 5 0 0 0 8 3Z"/>
+              <path d="M8 13a5 5 0 0 0 4.546-2.914.75.75 0 0 0-1.342-.67A5 5 0 0 1 2.534 8H1.75a.75.75 0 0 0-.53 1.28l1.5 1.5a.75.75 0 0 0 1.06 0l1.5-1.5A.75.75 0 0 0 4.75 8h-.716A5 5 0 0 0 8 13Z"/>
+            </svg>
+            {{ state.busy === "sync-workspace" ? "Memindai..." : "Sinkronkan" }}
+          </button>
+          <button class="btn btn-add" type="button" @click="openWizard">
+            <svg class="icon-plus" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z"/>
+            </svg>
+            Tambah
+          </button>
+        </div>
       </div>
 
       <!-- Quick Filter -->
@@ -182,6 +204,52 @@ function openWizard() {
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-sync:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-sync:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.icon-sync {
+  width: 12px;
+  height: 12px;
+}
+
+.icon-sync.spinning {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .icon-plus {

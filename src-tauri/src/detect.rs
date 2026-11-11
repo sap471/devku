@@ -51,7 +51,47 @@ pub fn detect(path: &Path) -> Option<Detection> {
         });
     }
 
+    if path.join("wp-config.php").is_file() {
+        return Some(Detection {
+            framework: "wordpress",
+            document_root: path.to_path_buf(),
+            project_root,
+        });
+    }
+
     if path.join("index.php").is_file() {
+        return Some(Detection {
+            framework: "php",
+            document_root: path.to_path_buf(),
+            project_root,
+        });
+    }
+
+    if path.join("symfony.lock").is_file() || path.join("bin").join("console").is_file() {
+        return Some(Detection {
+            framework: "symfony",
+            document_root: public_or(path),
+            project_root,
+        });
+    }
+
+    if path.join("config").join("bootstrap.php").is_file() {
+        return Some(Detection {
+            framework: "slim",
+            document_root: public_or(path),
+            project_root,
+        });
+    }
+
+    if path.join("drupal.org").is_dir() || path.join("core").join("core.services.yml").is_file() {
+        return Some(Detection {
+            framework: "drupal",
+            document_root: path.to_path_buf(),
+            project_root,
+        });
+    }
+
+    if path.join("composer.json").is_file() {
         return Some(Detection {
             framework: "php",
             document_root: path.to_path_buf(),
@@ -77,6 +117,10 @@ pub fn label(framework: &str) -> &str {
         "laravel" => "Laravel",
         "codeigniter3" => "CodeIgniter 3",
         "codeigniter4" => "CodeIgniter 4",
+        "wordpress" => "WordPress",
+        "symfony" => "Symfony",
+        "slim" => "Slim",
+        "drupal" => "Drupal",
         "php" => "PHP",
         other => other,
     }
@@ -157,6 +201,69 @@ mod tests {
         write(&dir.join("README.md"), "not php");
 
         assert!(detect(&dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detects_wordpress_after_plain_index() {
+        let dir = temp_project("wordpress");
+        write(&dir.join("index.php"), "<?php");
+        write(&dir.join("wp-config.php"), "<?php");
+
+        let found = detect(&dir).unwrap();
+        assert_eq!(found.framework, "wordpress");
+        assert_eq!(found.document_root, dir);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detects_symfony_from_lock_or_console() {
+        let dir = temp_project("symfony");
+        write(&dir.join("symfony.lock"), "");
+        write(&dir.join("bin/console"), "#!/usr/bin/env php");
+
+        let found = detect(&dir).unwrap();
+        assert_eq!(found.framework, "symfony");
+        assert_eq!(found.document_root, dir);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detects_slim_from_config_bootstrap() {
+        let dir = temp_project("slim");
+        write(&dir.join("config/bootstrap.php"), "<?php");
+
+        let found = detect(&dir).unwrap();
+        assert_eq!(found.framework, "slim");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detects_drupal_from_core_services() {
+        let dir = temp_project("drupal");
+        write(&dir.join("core/core.services.yml"), "");
+
+        let found = detect(&dir).unwrap();
+        assert_eq!(found.framework, "drupal");
+        assert_eq!(found.document_root, dir);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A composer project with no marker still becomes a site, so a plain
+    /// dependency folder does not silently fail detection.
+    #[test]
+    fn composer_project_falls_back_to_php() {
+        let dir = temp_project("composer-plain");
+        write(&dir.join("composer.json"), "{}");
+
+        let found = detect(&dir).unwrap();
+        assert_eq!(found.framework, "php");
+        assert_eq!(found.document_root, dir);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

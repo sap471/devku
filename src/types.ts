@@ -103,6 +103,14 @@ export interface ImportReport {
   active_php_cleared: string | null;
 }
 
+/** One workspace scan: which folders were registered, which were left alone. */
+export interface SyncReport {
+  added: string[];
+  existing: string[];
+  skipped: string[];
+  failed: string[];
+}
+
 export interface ImportResponse {
   report: ImportReport;
   snapshot: Snapshot;

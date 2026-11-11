@@ -81,6 +81,7 @@ pub fn run() {
             commands::stop,
             commands::trust_caddy,
             commands::add_site,
+            commands::sync_workspace,
             commands::remove_site,
             commands::set_site_enabled,
             commands::detect_project,

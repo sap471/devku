@@ -14,6 +14,7 @@ import type {
   MoveReport,
   ImportResponse,
   ImportReport,
+  SyncReport,
   PhpRemoval,
   PhpRemovalResponse,
   DatabaseRemovalResponse,
@@ -39,6 +40,10 @@ export const FRAMEWORK_LABEL: Record<string, string> = {
   laravel: "Laravel",
   codeigniter4: "CodeIgniter 4",
   codeigniter3: "CodeIgniter 3",
+  wordpress: "WordPress",
+  symfony: "Symfony",
+  slim: "Slim",
+  drupal: "Drupal",
   php: "PHP",
 };
 
@@ -313,8 +318,45 @@ export async function askRemoveSite(id: string): Promise<void> {
   }
 }
 
-export async function setSitePhp(siteId: string, version: string): Promise<void> {
-  state.busy = "set-php";
+/// Scans the workspace folder and registers every framework project inside.
+/// The command returns a report; the snapshot is refreshed after, because a
+/// scan can add several sites at once.
+export async function syncWorkspace(): Promise<void> {
+  state.busy = "sync-workspace";
+  state.notice = null;
+  state.infoNotice = null;
+  try {
+    const report = await invoke<SyncReport>("sync_workspace");
+    await refresh();
+    state.infoNotice = summarizeSync(report);
+  } catch (err) {
+    state.notice = `Gagal menyinkronkan workspace: ${String(err)}`;
+  } finally {
+    state.busy = null;
+  }
+}
+
+function summarizeSync(report: SyncReport): string {
+  const parts: string[] = [];
+  if (report.added.length) {
+    parts.push(`${report.added.length} situs ditambahkan: ${report.added.join(", ")}`);
+  }
+  if (report.existing.length) {
+    parts.push(`${report.existing.length} sudah terdaftar`);
+  }
+  if (report.skipped.length) {
+    parts.push(`Dilewati (bukan project PHP): ${report.skipped.join(", ")}`);
+  }
+  if (report.failed.length) {
+    parts.push(`Gagal: ${report.failed.join("; ")}`);
+  }
+  if (!parts.length) {
+    return "Workspace sudah sinkron, tidak ada folder baru.";
+  }
+  return parts.join(". ") + ".";
+}
+
+export async function setSitePhp(siteId: string, version: string): Promise<void> {  state.busy = "set-php";
   state.notice = null;
   try {
     const next = await invoke<Snapshot>("set_site_php", { id: siteId, version });

@@ -111,6 +111,21 @@ pub struct DatabaseRemoval {
     pub removed_data: bool,
 }
 
+/// Outcome of one workspace scan, so the UI can report every folder
+/// instead of only "berhasil".
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct SyncReport {
+    /// Site ids registered by this scan.
+    pub added: Vec<String>,
+    /// Folders already registered, matched by project root.
+    pub existing: Vec<String>,
+    /// Folder names with no framework marker.
+    pub skipped: Vec<String>,
+    /// Folder name plus the reason registration failed, for example PHP
+    /// is not installed yet.
+    pub failed: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub tld: String,
@@ -442,6 +457,16 @@ impl Session {
     }
 
     pub async fn add_site(&mut self, draft: SiteDraft) -> Result<Site> {
+        let site = self.register_site(draft)?;
+        self.config.save(&self.paths)?;
+        self.refresh().await?;
+        Ok(site)
+    }
+
+    /// Builds the site from the folder and pushes it into the config without
+    /// saving or reloading. Callers that add many sites at once save and
+    /// refresh once, so a scan does not reload Caddy per folder.
+    fn register_site(&mut self, draft: SiteDraft) -> Result<Site> {
         if !draft.path.exists() {
             bail!("folder {} tidak ada", draft.path.display());
         }
@@ -511,9 +536,74 @@ impl Session {
         };
 
         self.config.sites.push(site.clone());
-        self.config.save(&self.paths)?;
-        self.refresh().await?;
         Ok(site)
+    }
+
+    /// Scans the workspace one level deep and registers every folder whose
+    /// framework marker `detect` recognises. Folders without a marker are
+    /// reported, never registered, so a plain asset folder stays out of the
+    /// site list. A failure on one folder does not stop the rest.
+    pub async fn sync_workspace(&mut self) -> Result<SyncReport> {
+        let root = self.config.workspace_dir();
+        if !root.is_dir() {
+            bail!("folder workspace {} tidak ada", root.display());
+        }
+
+        let mut report = SyncReport::default();
+        let mut folders: Vec<PathBuf> = Vec::new();
+
+        for entry in
+            std::fs::read_dir(&root).with_context(|| format!("gagal membaca {}", root.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            }
+        }
+        folders.sort();
+
+        for dir in folders {
+            let name = folder_name(&dir);
+
+            if detect::detect(&dir).is_none() {
+                report.skipped.push(name);
+                continue;
+            }
+
+            // An existing site can point at a subfolder (Laravel's public/),
+            // so the project root is what marks a folder as registered.
+            if self.config.sites.iter().any(|site| {
+                let registered = site.root.clone().unwrap_or_else(|| site.path.clone());
+                same_folder(&registered, &dir)
+            }) {
+                report.existing.push(name);
+                continue;
+            }
+
+            let draft = SiteDraft {
+                path: dir.clone(),
+                php: None,
+                id: None,
+                name: None,
+                domain: None,
+                framework: None,
+            };
+
+            match self.register_site(draft) {
+                Ok(site) => report.added.push(site.id),
+                Err(err) => report.failed.push(format!("{name}: {err:#}")),
+            }
+        }
+
+        // One save and one reload for the whole scan. Without a reload there
+        // is nothing to do, so a stopped DevKu stays untouched.
+        if !report.added.is_empty() {
+            self.config.save(&self.paths)?;
+            self.refresh().await?;
+        }
+
+        Ok(report)
     }
 
     pub async fn remove_site(&mut self, id: &str) -> Result<()> {
@@ -586,7 +676,8 @@ impl Session {
 
     /// Stops without touching other services; used before reinstalling
     /// Apache because a running httpd.exe cannot be overwritten.
-    pub async fn stop_apache(&mut self) {        if let Some(runtime) = self.runtime.as_mut() {
+    pub async fn stop_apache(&mut self) {
+        if let Some(runtime) = self.runtime.as_mut() {
             runtime.stop_apache().await;
         }
     }
@@ -1139,6 +1230,17 @@ fn folder_name(path: &Path) -> String {
         .to_string()
 }
 
+/// Compares two folders by their canonical path so a workspace entry and a
+/// stored site root match even when one has a trailing separator or a
+/// different case on Windows. Falls back to plain equality when a folder
+/// cannot be canonicalised, for example when it is gone.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 /// Windows sometimes holds a handle briefly after a process dies, so
 /// deletion is retried a few times before giving up.
 fn remove_php_dir(paths: &Paths, version: &str) -> Result<()> {
@@ -1224,6 +1326,57 @@ mod tests {
         assert_eq!(slug("--My Project!!"), "my-project");
         assert_eq!(slug("sudah-ok"), "sudah-ok");
         assert_eq!(slug("!!!"), "site");
+    }
+
+    /// A scan registers detected folders, leaves a non-framework folder
+    /// alone, and does not register the same project twice.
+    #[tokio::test]
+    async fn sync_workspace_registers_detected_folders_once() {
+        let root = std::env::temp_dir().join(format!("devku-sync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+
+        let dir = paths.php_dir("8.3.36");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("php-cgi.exe"), b"").unwrap();
+
+        let workspace = root.join("sites");
+        let laravel = workspace.join("app");
+        std::fs::create_dir_all(laravel.join("public")).unwrap();
+        std::fs::write(laravel.join("artisan"), "").unwrap();
+        std::fs::write(laravel.join("public/index.php"), "<?php").unwrap();
+
+        let assets = workspace.join("aset");
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(assets.join("logo.svg"), "<svg/>").unwrap();
+
+        let config = Config {
+            workspace: Some(workspace.clone()),
+            ..Config::default()
+        };
+        config.save(&paths).unwrap();
+
+        let mut session = Session::new(paths.clone(), None).unwrap();
+
+        let report = session.sync_workspace().await.unwrap();
+        assert_eq!(report.added, vec!["app".to_string()]);
+        assert_eq!(report.skipped, vec!["aset".to_string()]);
+        assert!(report.existing.is_empty());
+        assert!(report.failed.is_empty());
+
+        // The stored document root is public/, while the marker is the root.
+        let site = &session.config().sites[0];
+        assert_eq!(site.path, laravel.join("public"));
+        assert_eq!(site.root.as_deref(), Some(laravel.as_path()));
+
+        // A second scan sees the site as already registered, not as new.
+        let again = session.sync_workspace().await.unwrap();
+        assert!(again.added.is_empty());
+        assert_eq!(again.existing, vec!["app".to_string()]);
+        assert_eq!(session.config().sites.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]
