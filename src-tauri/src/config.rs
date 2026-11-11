@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::database::DatabaseEngine;
 use crate::paths::{Paths, write_atomic};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -96,30 +97,126 @@ pub struct Config {
     pub sites: Vec<Site>,
 }
 
-/// Local database server settings.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// Local database server settings. The engine is an explicit entry so
+/// `config.json` says which server it describes instead of implying MariaDB.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DatabaseSettings {
-    /// TCP port. 3306 is the MariaDB default and what Laravel `.env` files use,
-    /// so this number is the one most often correct.
-    #[serde(default = "default_db_port")]
+    pub engines: Vec<DbEngineSettings>,
+}
+
+impl<'de> Deserialize<'de> for DatabaseSettings {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// Configs written before the engine list hold the settings directly on
+        /// the database object, so both shapes have to be accepted.
+        #[derive(Deserialize)]
+        struct Raw {
+            #[serde(default)]
+            engines: Option<Vec<DbEngineSettings>>,
+            #[serde(default)]
+            port: Option<u16>,
+            #[serde(default)]
+            autostart: Option<bool>,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        if let Some(engines) = raw.engines {
+            return Ok(Self { engines });
+        }
+
+        Ok(Self {
+            engines: vec![DbEngineSettings {
+                engine: DatabaseEngine::Mariadb,
+                port: raw.port.unwrap_or_else(default_db_port),
+                autostart: raw.autostart.unwrap_or(false),
+            }],
+        })
+    }
+}
+
+/// One engine the user chose to use. `autostart` is per engine because a
+/// second engine may be wanted only on demand.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct DbEngineSettings {
+    #[serde(default)]
+    pub engine: DatabaseEngine,
+    #[serde(default = "default_port_for")]
     pub port: u16,
-    /// The database starts only when checked. Off by default because it is an
-    /// add-on feature, not a requirement for running a site.
     #[serde(default)]
     pub autostart: bool,
 }
 
-fn default_db_port() -> u16 {
-    3306
+impl DatabaseSettings {
+    pub fn entry(&self, engine: DatabaseEngine) -> Option<&DbEngineSettings> {
+        self.engines.iter().find(|item| item.engine == engine)
+    }
+
+    pub fn entry_mut(&mut self, engine: DatabaseEngine) -> Option<&mut DbEngineSettings> {
+        self.engines.iter_mut().find(|item| item.engine == engine)
+    }
+
+    /// Port and autostart of one engine, or its defaults when it is not
+    /// configured. Callers that still deal with a single engine use this so
+    /// they do not have to spell out "not configured" everywhere.
+    pub fn port_of(&self, engine: DatabaseEngine) -> u16 {
+        self.entry(engine)
+            .map(|item| item.port)
+            .unwrap_or_else(|| engine.default_port())
+    }
+
+    pub fn autostart_of(&self, engine: DatabaseEngine) -> bool {
+        self.entry(engine).is_some_and(|item| item.autostart)
+    }
+
+    /// The two MySQL-family servers cannot share a machine: they speak the same
+    /// protocol, default to the same port, and a user cannot tell which one
+    /// answered. PostgreSQL has its own port and auth model, so it may run
+    /// alongside either.
+    pub fn validate(&self) -> Result<()> {
+        let has_mariadb = self.entry(DatabaseEngine::Mariadb).is_some();
+        let has_mysql = self.entry(DatabaseEngine::Mysql).is_some();
+        if has_mariadb && has_mysql {
+            bail!("MariaDB dan MySQL tidak bisa dipakai bersamaan: pilih salah satu");
+        }
+
+        let mut seen = BTreeSet::new();
+        for item in &self.engines {
+            if !seen.insert(item.engine) {
+                bail!("engine {} tercantum lebih dari sekali", item.engine.key());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_port_for() -> u16 {
+    // Only used when a hand-written entry omits `port`; `DbEngineSettings::default`
+    // is what picks the per-engine port for a new entry.
+    default_db_port()
+}
+
+impl Default for DbEngineSettings {
+    fn default() -> Self {
+        Self {
+            engine: DatabaseEngine::Mariadb,
+            port: default_db_port(),
+            autostart: false,
+        }
+    }
 }
 
 impl Default for DatabaseSettings {
     fn default() -> Self {
         Self {
-            port: default_db_port(),
-            autostart: false,
+            engines: vec![DbEngineSettings::default()],
         }
     }
+}
+
+fn default_db_port() -> u16 {
+    DatabaseEngine::Mariadb.default_port()
 }
 
 /// DevKu installs Apache in `engines/apache` and it listens on loopback only.
@@ -241,6 +338,10 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.database
+            .validate()
+            .context("pengaturan database tidak valid")?;
+
         for site in &self.sites {
             if site.id.is_empty() {
                 anyhow::bail!("site tanpa id");
@@ -317,5 +418,89 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let back: Config = serde_json::from_str(&json).unwrap();
         assert!(back.onboarded);
+    }
+
+    #[test]
+    fn old_config_without_engines_loads_as_mariadb() {
+        let config: Config =
+            serde_json::from_str(r#"{"version":1,"database":{"port":3306,"autostart":true}}"#)
+                .unwrap();
+        assert_eq!(config.database.engines.len(), 1);
+        assert_eq!(config.database.engines[0].engine, DatabaseEngine::Mariadb);
+        assert_eq!(config.database.engines[0].port, 3306);
+        assert!(config.database.engines[0].autostart);
+    }
+
+    #[test]
+    fn maria_and_mysql_together_is_refused() {
+        let settings = DatabaseSettings {
+            engines: vec![
+                DbEngineSettings {
+                    engine: DatabaseEngine::Mariadb,
+                    port: 3306,
+                    autostart: true,
+                },
+                DbEngineSettings {
+                    engine: DatabaseEngine::Mysql,
+                    port: 3307,
+                    autostart: true,
+                },
+            ],
+        };
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn postgres_alongside_maria_is_accepted() {
+        let settings = DatabaseSettings {
+            engines: vec![
+                DbEngineSettings {
+                    engine: DatabaseEngine::Mariadb,
+                    port: 3306,
+                    autostart: true,
+                },
+                DbEngineSettings {
+                    engine: DatabaseEngine::Postgres,
+                    port: 5432,
+                    autostart: true,
+                },
+            ],
+        };
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn config_validate_rejects_two_mysql_family_engines() {
+        let mut config = Config::default();
+        config.database.engines = vec![
+            DbEngineSettings {
+                engine: DatabaseEngine::Mariadb,
+                port: 3306,
+                autostart: false,
+            },
+            DbEngineSettings {
+                engine: DatabaseEngine::Mysql,
+                port: 3307,
+                autostart: false,
+            },
+        ];
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn duplicate_engine_entries_are_refused() {
+        let settings = DatabaseSettings {
+            engines: vec![DbEngineSettings::default(), DbEngineSettings::default()],
+        };
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn database_engines_round_trip_stably() {
+        let config = Config::default();
+        let text = serde_json::to_string_pretty(&config).unwrap();
+        let again: Config = serde_json::from_str(&text).unwrap();
+        assert_eq!(again.database.engines, config.database.engines);
+        assert!(text.contains("\"engine\": \"mariadb\""));
     }
 }

@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Backend, Config, Site};
-use crate::database::{Conn, DatabaseBackend, Mariadb};
+use crate::database::{Conn, DatabaseBackend, DatabaseEngine, Mariadb};
 use crate::detect;
 use crate::paths::Paths;
 use crate::proc::ServiceState;
@@ -360,8 +360,8 @@ impl Session {
             version: database_backend.version().to_string(),
             installed: database_backend.is_installed(),
             initialized: database_backend.is_initialized(),
-            port: self.config.database.port,
-            autostart: self.config.database.autostart,
+            port: self.config.database.port_of(DatabaseEngine::Mariadb),
+            autostart: self.config.database.autostart_of(DatabaseEngine::Mariadb),
             status: database_service
                 .as_ref()
                 .map(|(status, _)| status.clone())
@@ -874,12 +874,12 @@ impl Session {
             bail!("MariaDB belum terpasang");
         }
 
-        backend.initialize(self.config.database.port)?;
+        backend.initialize(self.config.database.port_of(DatabaseEngine::Mariadb))?;
         if !self.paths.mariadb_password().exists() {
             backend.store_password("")?;
         }
 
-        if self.config.database.autostart && self.runtime.is_some() {
+        if self.config.database.autostart_of(DatabaseEngine::Mariadb) && self.runtime.is_some() {
             self.start_database().await?;
         }
         Ok(())
@@ -893,7 +893,7 @@ impl Session {
 
         // Binaries can arrive without a datadir, for example after the data folder
         // was cleaned. Preparing here keeps the Mulai button working.
-        backend.initialize(self.config.database.port)?;
+        backend.initialize(self.config.database.port_of(DatabaseEngine::Mariadb))?;
         if !self.paths.mariadb_password().exists() {
             backend.store_password("")?;
         }
@@ -901,7 +901,7 @@ impl Session {
         let Some(runtime) = self.runtime.as_mut() else {
             bail!("service belum berjalan");
         };
-        let port = self.config.database.port;
+        let port = self.config.database.port_of(DatabaseEngine::Mariadb);
         runtime
             .ensure_database(port, &self.paths, self.hook.clone())
             .await?;
@@ -918,7 +918,9 @@ impl Session {
     /// The autostart checkbox decides whether the database starts and stops with
     /// the other services.
     pub async fn set_database_autostart(&mut self, enabled: bool) -> Result<()> {
-        self.config.database.autostart = enabled;
+        if let Some(entry) = self.config.database.entry_mut(DatabaseEngine::Mariadb) {
+            entry.autostart = enabled;
+        }
         self.config.save(&self.paths)?;
 
         if enabled {
@@ -942,7 +944,7 @@ impl Session {
             bail!("service belum berjalan");
         }
 
-        let port = self.config.database.port;
+        let port = self.config.database.port_of(DatabaseEngine::Mariadb);
         let current = backend.password();
         let direct = backend.set_password(port, &current, password).is_ok();
 
@@ -993,7 +995,7 @@ impl Session {
             self.start_database().await?;
         }
 
-        let port = self.config.database.port;
+        let port = self.config.database.port_of(DatabaseEngine::Mariadb);
         let password = backend.password();
         let dest = self
             .paths

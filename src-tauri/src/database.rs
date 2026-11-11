@@ -33,7 +33,9 @@ pub fn checksums_url(version: &str) -> String {
 
 /// Engine names as they appear in `config.json`. `Mysql` shares the MariaDB
 /// driver but is a separate choice: the two cannot run together.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseEngine {
     #[default]
@@ -49,6 +51,16 @@ impl DatabaseEngine {
             Self::Mariadb => "mariadb",
             Self::Mysql => "mysql",
             Self::Postgres => "postgres",
+        }
+    }
+
+    /// The port `.env` files and client tools expect for this engine. 3306 is
+    /// what Laravel expects from the MySQL family; PostgreSQL's compiled-in
+    /// default is 5432.
+    pub fn default_port(&self) -> u16 {
+        match self {
+            Self::Mariadb | Self::Mysql => 3306,
+            Self::Postgres => 5432,
         }
     }
 }

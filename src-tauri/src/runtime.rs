@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::apache::ApacheBackend;
 use crate::caddy::{CaddyBackend, WebServerBackend};
 use crate::config::Config;
-use crate::database::{DatabaseBackend, Mariadb};
+use crate::database::{DatabaseBackend, DatabaseEngine, Mariadb};
 use crate::paths::Paths;
 use crate::php::PhpManager;
 use crate::ports;
@@ -62,9 +62,13 @@ impl Runtime {
         let database = Mariadb::new(paths.clone());
         runtime.database_present = database.is_installed() && database.is_initialized();
         if runtime.database_present
-            && config.database.autostart
+            && config.database.autostart_of(DatabaseEngine::Mariadb)
             && let Err(err) = runtime
-                .ensure_database(config.database.port, &paths, hook.clone())
+                .ensure_database(
+                    config.database.port_of(DatabaseEngine::Mariadb),
+                    &paths,
+                    hook.clone(),
+                )
                 .await
         {
             // The database never blocks sites: failures are recorded and other
