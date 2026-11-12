@@ -6,7 +6,7 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Changed
 
-- Database services are supervised per engine instead of as one slot. Every engine listed in `config.json` starts on its own port, and a failure in one engine is recorded for that engine alone while the others and the sites keep running. Settings now shows one card per engine with its own status, port, autostart, password, data folder, and remove action. Start, stop, autostart, backup, and remove commands take the engine key.
+- Database services are supervised per engine instead of as one slot. Every engine listed in `config.json` starts on its own port, and a failure in one engine is recorded for that engine alone while the others and the sites keep running. Settings now shows one card per engine with its own status, port, autostart, password, data folder, and remove action. Start, stop, autostart, backup, and remove commands take the engine key. (`e051862`)
 
 ### Added
 
