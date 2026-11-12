@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::apache::ApacheBackend;
 use crate::caddy::{CaddyBackend, WebServerBackend};
 use crate::config::Config;
-use crate::database::{DatabaseBackend, DatabaseEngine, Mariadb};
+use crate::database::{self, DatabaseEngine};
 use crate::paths::Paths;
 use crate::php::PhpManager;
 use crate::ports;
@@ -26,11 +26,11 @@ pub struct Runtime {
     /// to avoid a restart when the config has not changed.
     apache_config: Option<String>,
     apache_error: Option<String>,
-    database: Option<Supervisor>,
-    /// The database is installed and its datadir is ready, so it is worth showing
-    /// as a service even while it is stopped.
-    database_present: bool,
-    database_error: Option<String>,
+    database: BTreeMap<DatabaseEngine, Supervisor>,
+    /// Engines installed with a ready datadir, so they are worth showing as a
+    /// service even while stopped.
+    database_present: BTreeSet<DatabaseEngine>,
+    database_errors: BTreeMap<DatabaseEngine, String>,
 }
 
 pub type Hook = Arc<dyn Fn(&str, &ServiceState) + Send + Sync>;
@@ -54,26 +54,31 @@ impl Runtime {
             apache: None,
             apache_config: None,
             apache_error: None,
-            database: None,
-            database_present: false,
-            database_error: None,
+            database: BTreeMap::new(),
+            database_present: BTreeSet::new(),
+            database_errors: BTreeMap::new(),
         };
 
-        let database = Mariadb::new(paths.clone());
-        runtime.database_present = database.is_installed() && database.is_initialized();
-        if runtime.database_present
-            && config.database.autostart_of(DatabaseEngine::Mariadb)
-            && let Err(err) = runtime
-                .ensure_database(
-                    config.database.port_of(DatabaseEngine::Mariadb),
-                    &paths,
-                    hook.clone(),
-                )
+        // Every configured engine is offered independently. One engine failing
+        // never keeps the others, or the sites, from starting.
+        for entry in &config.database.engines {
+            let engine = entry.engine;
+            let Ok(backend) = database::backend_for(&paths, engine) else {
+                continue;
+            };
+            if !backend.is_installed() || !backend.is_initialized() || !backend.has_server() {
+                continue;
+            }
+            runtime.database_present.insert(engine);
+            if !entry.autostart {
+                continue;
+            }
+            if let Err(err) = runtime
+                .ensure_database(engine, entry.port, &paths, hook.clone())
                 .await
-        {
-            // The database never blocks sites: failures are recorded and other
-            // services keep running.
-            runtime.database_error = Some(format!("{err:#}"));
+            {
+                runtime.database_errors.insert(engine, format!("{err:#}"));
+            }
         }
 
         for version in port_map.keys() {
@@ -245,15 +250,16 @@ impl Runtime {
         Ok(port)
     }
 
-    /// Starts the database on the requested port. A conflicting port is reported
+    /// Starts one engine on the requested port. A conflicting port is reported
     /// as is rather than silently shifted, so `.env` does not break on its own.
     pub async fn ensure_database(
         &mut self,
+        engine: DatabaseEngine,
         port: u16,
         paths: &Paths,
         hook: Option<Hook>,
     ) -> Result<u16> {
-        let backend = Mariadb::new(paths.clone());
+        let backend = database::backend_for(paths, engine)?;
         if !backend.is_installed() || !backend.is_initialized() {
             anyhow::bail!("database belum siap");
         }
@@ -264,37 +270,43 @@ impl Runtime {
         let spec = backend
             .spec(port)?
             .ok_or_else(|| anyhow::anyhow!("database tidak punya proses server"))?;
-        self.start_database_spec(spec, hook).await?;
-        self.database_present = true;
+        self.start_database_spec(engine, spec, hook).await?;
+        self.database_present.insert(engine);
         Ok(port)
     }
 
-    /// Runs the database spec as is, including the password recovery spec.
+    /// Runs one engine's spec as is, including the password recovery spec.
     pub async fn start_database_spec(
         &mut self,
+        engine: DatabaseEngine,
         spec: ServiceSpec,
         hook: Option<Hook>,
     ) -> Result<()> {
-        self.stop_database().await;
+        self.stop_database(engine).await;
 
         let supervisor = Supervisor::start(spec, hook)?;
         if let Err(reason) = supervisor.wait_ready(Duration::from_secs(30)).await {
             supervisor.shutdown().await;
             anyhow::bail!("database gagal siap: {reason}");
         }
-        self.database = Some(supervisor);
-        self.database_error = None;
+        self.database.insert(engine, supervisor);
+        self.database_errors.remove(&engine);
         Ok(())
     }
 
-    pub async fn stop_database(&mut self) {
-        if let Some(supervisor) = self.database.take() {
+    pub async fn stop_database(&mut self, engine: DatabaseEngine) {
+        if let Some(supervisor) = self.database.remove(&engine) {
             supervisor.shutdown().await;
         }
     }
 
-    pub fn database_running(&self) -> bool {
-        self.database.is_some()
+    pub fn database_running(&self, engine: DatabaseEngine) -> bool {
+        self.database.contains_key(&engine)
+    }
+
+    /// The last recorded start failure of one engine, for the UI detail line.
+    pub fn database_error(&self, engine: DatabaseEngine) -> Option<&str> {
+        self.database_errors.get(&engine).map(String::as_str)
     }
 
     /// Reloads config without stopping anything.
@@ -329,17 +341,29 @@ impl Runtime {
                 },
             ));
         }
-        if let Some(database) = &self.database {
-            out.push(("mariadb".to_string(), database.state().await));
-        } else if let Some(reason) = &self.database_error {
-            out.push((
-                "mariadb".to_string(),
-                ServiceState::Failed {
-                    reason: reason.clone(),
+        for engine in &self.database_present {
+            let name = engine.key().to_string();
+            let state = match self.database.get(engine) {
+                Some(supervisor) => supervisor.state().await,
+                None => match self.database_errors.get(engine) {
+                    Some(reason) => ServiceState::Failed {
+                        reason: reason.clone(),
+                    },
+                    None => ServiceState::Stopped,
                 },
-            ));
-        } else if self.database_present {
-            out.push(("mariadb".to_string(), ServiceState::Stopped));
+            };
+            out.push((name, state));
+        }
+        // An engine that failed before its datadir was ready still has to appear.
+        for (engine, reason) in &self.database_errors {
+            if !self.database_present.contains(engine) {
+                out.push((
+                    engine.key().to_string(),
+                    ServiceState::Failed {
+                        reason: reason.clone(),
+                    },
+                ));
+            }
         }
         out
     }
@@ -352,11 +376,11 @@ impl Runtime {
             database,
             ..
         } = self;
-        if let Some(database) = database {
-            database.shutdown().await;
-        }
         if let Some(caddy) = caddy {
             caddy.shutdown().await;
+        }
+        for supervisor in database.into_values() {
+            supervisor.shutdown().await;
         }
         if let Some(apache) = apache {
             apache.shutdown().await;
@@ -370,5 +394,39 @@ impl Runtime {
         for (_, supervisor) in self.php.drain(..) {
             supervisor.shutdown().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One engine failing to start must not erase another engine's error or
+    /// pretend the failed one is running.
+    #[test]
+    fn database_state_is_tracked_per_engine() {
+        let mut runtime = Runtime {
+            ports: BTreeMap::new(),
+            php: Vec::new(),
+            caddy: None,
+            apache: None,
+            apache_config: None,
+            apache_error: None,
+            database: BTreeMap::new(),
+            database_present: BTreeSet::from([DatabaseEngine::Postgres]),
+            database_errors: BTreeMap::new(),
+        };
+
+        runtime
+            .database_errors
+            .insert(DatabaseEngine::Postgres, "gagal mulai".to_string());
+
+        assert_eq!(
+            runtime.database_error(DatabaseEngine::Postgres),
+            Some("gagal mulai")
+        );
+        assert_eq!(runtime.database_error(DatabaseEngine::Mariadb), None);
+        assert!(!runtime.database_running(DatabaseEngine::Postgres));
+        assert!(!runtime.database_running(DatabaseEngine::Mariadb));
     }
 }

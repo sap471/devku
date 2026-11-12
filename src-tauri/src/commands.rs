@@ -1048,30 +1048,37 @@ async fn install_database_inner(
 }
 
 #[tauri::command]
-pub async fn start_database(state: State<'_, AppState>) -> Result<Snapshot, String> {
+pub async fn start_database(
+    state: State<'_, AppState>,
+    engine: DatabaseEngine,
+) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
     let session = guard
         .as_mut()
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
-    session.start_database().await.map_err(error)?;
+    session.start_database_engine(engine).await.map_err(error)?;
     Ok(session.snapshot().await)
 }
 
 #[tauri::command]
-pub async fn stop_database(state: State<'_, AppState>) -> Result<Snapshot, String> {
+pub async fn stop_database(
+    state: State<'_, AppState>,
+    engine: DatabaseEngine,
+) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
     let session = guard
         .as_mut()
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
-    session.stop_database().await.map_err(error)?;
+    session.stop_database_engine(engine).await.map_err(error)?;
     Ok(session.snapshot().await)
 }
 
 #[tauri::command]
 pub async fn set_database_autostart(
     state: State<'_, AppState>,
+    engine: DatabaseEngine,
     enabled: bool,
 ) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
@@ -1080,7 +1087,7 @@ pub async fn set_database_autostart(
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
     session
-        .set_database_autostart(enabled)
+        .set_database_autostart(engine, enabled)
         .await
         .map_err(error)?;
     Ok(session.snapshot().await)
@@ -1089,6 +1096,7 @@ pub async fn set_database_autostart(
 #[tauri::command]
 pub async fn reset_database_password(
     state: State<'_, AppState>,
+    engine: DatabaseEngine,
     password: String,
 ) -> Result<Snapshot, String> {
     let mut guard = state.session.lock().await;
@@ -1097,7 +1105,7 @@ pub async fn reset_database_password(
         .ok_or_else(|| unavailable(&state.boot_error))?;
 
     session
-        .reset_database_password(&password)
+        .reset_database_password(engine, &password)
         .await
         .map_err(error)?;
     Ok(session.snapshot().await)
@@ -1106,6 +1114,7 @@ pub async fn reset_database_password(
 #[tauri::command]
 pub async fn remove_database(
     state: State<'_, AppState>,
+    engine: DatabaseEngine,
     remove_data: bool,
     backup: bool,
 ) -> Result<DatabaseRemovalResponse, String> {
@@ -1116,12 +1125,15 @@ pub async fn remove_database(
 
     // A backup only makes sense when the data is actually discarded.
     let backup_path = if backup && remove_data {
-        Some(session.backup_database().await.map_err(error)?)
+        Some(session.backup_database(engine).await.map_err(error)?)
     } else {
         None
     };
 
-    let removal = session.remove_database(remove_data).await.map_err(error)?;
+    let removal = session
+        .remove_database(engine, remove_data)
+        .await
+        .map_err(error)?;
 
     Ok(DatabaseRemovalResponse {
         removal,

@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Backend, Config, Site};
-use crate::database::{Conn, DatabaseBackend, DatabaseEngine, Mariadb};
+use crate::config::{Backend, Config, DbEngineSettings, Site};
+use crate::database::{self, Conn, DatabaseBackend, DatabaseEngine, Mariadb};
 use crate::detect;
 use crate::paths::Paths;
 use crate::proc::ServiceState;
@@ -97,6 +97,8 @@ pub struct DatabaseView {
     pub version: String,
     pub installed: bool,
     pub initialized: bool,
+    /// False when the engine spawns nothing; the UI then hides start and stop.
+    pub has_server: bool,
     pub port: u16,
     pub autostart: bool,
     pub status: String,
@@ -160,7 +162,7 @@ pub struct Snapshot {
     pub sites: Vec<SiteView>,
     pub services: Vec<ServiceView>,
     /// Local database server, including when it is not installed.
-    pub database: DatabaseView,
+    pub database: Vec<DatabaseView>,
     /// Optional Apache backend, always present so the UI can show
     /// its state even before it is configured.
     pub apache: ApacheView,
@@ -348,29 +350,64 @@ impl Session {
 
         let composer = crate::composer::status(&self.paths);
 
-        let database_backend = Mariadb::new(self.paths.clone());
-        let database_service = services
+        // One view per configured engine. An engine whose binaries are missing
+        // still gets a row, reporting `installed: false`, so the user sees why
+        // it cannot start instead of an engine silently disappearing.
+        let database: Vec<DatabaseView> = self
+            .config
+            .database
+            .engines
             .iter()
-            .find(|item| item.name == "mariadb")
-            .map(|item| (item.status.clone(), item.detail.clone()));
+            .map(|entry| {
+                let engine = entry.engine;
+                let service = services
+                    .iter()
+                    .find(|item| item.name == engine.key())
+                    .map(|item| (item.status.clone(), item.detail.clone()));
+                let backend = database::backend_for(&self.paths, engine).ok();
+                let has_password = engine != DatabaseEngine::Postgres
+                    && !Mariadb::for_engine(self.paths.clone(), engine)
+                        .password()
+                        .is_empty();
 
-        let database = DatabaseView {
-            engine: database_backend.engine().key().to_string(),
-            label: database_backend.label().to_string(),
-            version: database_backend.version().to_string(),
-            installed: database_backend.is_installed(),
-            initialized: database_backend.is_initialized(),
-            port: self.config.database.port_of(DatabaseEngine::Mariadb),
-            autostart: self.config.database.autostart_of(DatabaseEngine::Mariadb),
-            status: database_service
-                .as_ref()
-                .map(|(status, _)| status.clone())
-                .unwrap_or_else(|| "stopped".to_string()),
-            detail: database_service.and_then(|(_, detail)| detail),
-            data_path: database_backend.data_dir().to_string_lossy().to_string(),
-            bin_path: database_backend.bin_dir().to_string_lossy().to_string(),
-            has_password: !database_backend.password().is_empty(),
-        };
+                DatabaseView {
+                    engine: engine.key().to_string(),
+                    label: backend
+                        .as_ref()
+                        .map(|backend| backend.label().to_string())
+                        .unwrap_or_else(|| engine.key().to_string()),
+                    version: backend
+                        .as_ref()
+                        .map(|backend| backend.version().to_string())
+                        .unwrap_or_default(),
+                    installed: backend
+                        .as_ref()
+                        .is_some_and(|backend| backend.is_installed()),
+                    initialized: backend
+                        .as_ref()
+                        .is_some_and(|backend| backend.is_initialized()),
+                    has_server: backend.as_ref().is_some_and(|backend| backend.has_server()),
+                    port: entry.port,
+                    autostart: entry.autostart,
+                    status: service
+                        .as_ref()
+                        .map(|(status, _)| status.clone())
+                        .unwrap_or_else(|| "stopped".to_string()),
+                    detail: service.and_then(|(_, detail)| detail),
+                    data_path: self
+                        .paths
+                        .database_data(engine)
+                        .to_string_lossy()
+                        .to_string(),
+                    bin_path: self
+                        .paths
+                        .database_bin(engine)
+                        .to_string_lossy()
+                        .to_string(),
+                    has_password,
+                }
+            })
+            .collect();
 
         let apache_backend = crate::apache::ApacheBackend::from_config(&self.paths, &self.config);
         let apache = ApacheView {
@@ -886,57 +923,88 @@ impl Session {
     }
 
     pub async fn start_database(&mut self) -> Result<()> {
-        let backend = Mariadb::new(self.paths.clone());
+        self.start_database_engine(DatabaseEngine::Mariadb).await
+    }
+
+    /// Starts one engine. The MariaDB and MySQL buttons both reach this, and the
+    /// steps are the same because they share a driver.
+    pub async fn start_database_engine(&mut self, engine: DatabaseEngine) -> Result<()> {
+        let backend = database::backend_for(&self.paths, engine)?;
         if !backend.is_installed() {
-            bail!("MariaDB belum terpasang");
+            bail!("{} belum terpasang", backend.label());
         }
 
         // Binaries can arrive without a datadir, for example after the data folder
         // was cleaned. Preparing here keeps the Mulai button working.
-        backend.initialize(self.config.database.port_of(DatabaseEngine::Mariadb))?;
-        if !self.paths.database_secret(DatabaseEngine::Mariadb).exists() {
-            backend.store_password("")?;
+        backend.initialize(self.config.database.port_of(engine))?;
+        // The stored root secret is the MySQL-family account model; PostgreSQL
+        // has roles and writes its own credential when its backend lands.
+        if engine != DatabaseEngine::Postgres && !self.paths.database_secret(engine).exists() {
+            let mariadb = Mariadb::for_engine(self.paths.clone(), engine);
+            mariadb.store_password("")?;
         }
 
         let Some(runtime) = self.runtime.as_mut() else {
             bail!("service belum berjalan");
         };
-        let port = self.config.database.port_of(DatabaseEngine::Mariadb);
+        let port = self.config.database.port_of(engine);
         runtime
-            .ensure_database(port, &self.paths, self.hook.clone())
+            .ensure_database(engine, port, &self.paths, self.hook.clone())
             .await?;
         Ok(())
     }
 
     pub async fn stop_database(&mut self) -> Result<()> {
+        self.stop_database_engine(DatabaseEngine::Mariadb).await
+    }
+
+    pub async fn stop_database_engine(&mut self, engine: DatabaseEngine) -> Result<()> {
         if let Some(runtime) = self.runtime.as_mut() {
-            runtime.stop_database().await;
+            runtime.stop_database(engine).await;
         }
         Ok(())
     }
 
     /// The autostart checkbox decides whether the database starts and stops with
     /// the other services.
-    pub async fn set_database_autostart(&mut self, enabled: bool) -> Result<()> {
-        if let Some(entry) = self.config.database.entry_mut(DatabaseEngine::Mariadb) {
-            entry.autostart = enabled;
+    pub async fn set_database_autostart(
+        &mut self,
+        engine: DatabaseEngine,
+        enabled: bool,
+    ) -> Result<()> {
+        match self.config.database.entry_mut(engine) {
+            Some(entry) => entry.autostart = enabled,
+            None => self.config.database.engines.push(DbEngineSettings {
+                engine,
+                port: engine.default_port(),
+                autostart: enabled,
+            }),
         }
         self.config.save(&self.paths)?;
 
         if enabled {
             if self.runtime.is_some() {
-                self.start_database().await?;
+                self.start_database_engine(engine).await?;
             }
         } else {
-            self.stop_database().await?;
+            self.stop_database_engine(engine).await?;
         }
         Ok(())
     }
 
     /// Changes the root password on every root account. If the DevKu password note
     /// is stale, the server is restarted briefly without the grant tables.
-    pub async fn reset_database_password(&mut self, password: &str) -> Result<()> {
-        let backend = Mariadb::new(self.paths.clone());
+    /// PostgreSQL has roles instead of root accounts and gets its own path when
+    /// its backend lands, so it is refused here.
+    pub async fn reset_database_password(
+        &mut self,
+        engine: DatabaseEngine,
+        password: &str,
+    ) -> Result<()> {
+        if engine == DatabaseEngine::Postgres {
+            bail!("ubah password PostgreSQL belum didukung");
+        }
+        let backend = Mariadb::for_engine(self.paths.clone(), engine);
         if !backend.is_installed() || !backend.is_initialized() {
             bail!("database belum siap");
         }
@@ -944,7 +1012,7 @@ impl Session {
             bail!("service belum berjalan");
         }
 
-        let port = self.config.database.port_of(DatabaseEngine::Mariadb);
+        let port = self.config.database.port_of(engine);
         let current = backend.password();
         let direct = backend.set_password(port, &current, password).is_ok();
 
@@ -954,7 +1022,7 @@ impl Session {
             self.runtime
                 .as_mut()
                 .expect("runtime sudah dicek")
-                .start_database_spec(recovery, hook)
+                .start_database_spec(engine, recovery, hook)
                 .await?;
 
             let result = backend.set_password(port, "", password);
@@ -965,7 +1033,7 @@ impl Session {
                     .runtime
                     .as_mut()
                     .expect("runtime masih ada")
-                    .start_database_spec(spec, hook)
+                    .start_database_spec(engine, spec, hook)
                     .await;
             }
 
@@ -977,8 +1045,8 @@ impl Session {
     }
 
     /// Back up every user-created database to a dated .sql file.
-    pub async fn backup_database(&mut self) -> Result<PathBuf> {
-        let backend = Mariadb::new(self.paths.clone());
+    pub async fn backup_database(&mut self, engine: DatabaseEngine) -> Result<PathBuf> {
+        let backend = database::backend_for(&self.paths, engine)?;
         if !backend.is_installed() || !backend.is_initialized() {
             bail!("database belum siap");
         }
@@ -989,18 +1057,20 @@ impl Session {
         let running = self
             .runtime
             .as_ref()
-            .map(|runtime| runtime.database_running())
+            .map(|runtime| runtime.database_running(engine))
             .unwrap_or(false);
         if !running {
-            self.start_database().await?;
+            self.start_database_engine(engine).await?;
         }
 
-        let port = self.config.database.port_of(DatabaseEngine::Mariadb);
-        let password = backend.password();
+        let port = self.config.database.port_of(engine);
+        let password = std::fs::read_to_string(self.paths.database_secret(engine))
+            .map(|text| text.trim_end_matches(['\r', '\n']).to_string())
+            .unwrap_or_default();
         let dest = self
             .paths
             .backups()
-            .join(format!("mariadb-{}.sql", timestamp()));
+            .join(format!("{}-{}.sql", engine.key(), timestamp()));
         let target = dest.clone();
 
         tokio::task::spawn_blocking(move || {
@@ -1018,23 +1088,26 @@ impl Session {
         Ok(dest)
     }
 
-    /// Deletes the MariaDB binaries. Data is deleted only when requested.
-    pub async fn remove_database(&mut self, remove_data: bool) -> Result<DatabaseRemoval> {
-        let backend = Mariadb::new(self.paths.clone());
+    /// Deletes one engine's binaries. Data is deleted only when requested.
+    pub async fn remove_database(
+        &mut self,
+        engine: DatabaseEngine,
+        remove_data: bool,
+    ) -> Result<DatabaseRemoval> {
+        let backend = database::backend_for(&self.paths, engine)?;
         if !backend.is_installed() && !backend.is_initialized() {
-            bail!("MariaDB belum terpasang");
+            bail!("{} belum terpasang", backend.label());
         }
 
         if let Some(runtime) = self.runtime.as_mut() {
-            runtime.stop_database().await;
+            runtime.stop_database(engine).await;
         }
 
-        remove_dir_retry(&self.paths.database_dir(DatabaseEngine::Mariadb))?;
-        let _ = std::fs::remove_file(self.paths.database_secret(DatabaseEngine::Mariadb));
-        let _ = std::fs::remove_file(
-            self.paths
-                .database_config(DatabaseEngine::Mariadb, "my.ini"),
-        );
+        remove_dir_retry(&self.paths.database_dir(engine))?;
+        let _ = std::fs::remove_file(self.paths.database_secret(engine));
+        let _ = std::fs::remove_file(self.paths.database_config(engine, "my.ini"));
+        let _ = std::fs::remove_file(self.paths.database_config(engine, "postgresql.conf"));
+        let _ = std::fs::remove_file(self.paths.database_config(engine, "pg_hba.conf"));
 
         if remove_data {
             backend.wipe()?;

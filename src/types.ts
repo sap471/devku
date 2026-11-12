@@ -135,6 +135,8 @@ export interface DatabaseView {
   version: string;
   installed: boolean;
   initialized: boolean;
+  /** False when the engine spawns no process, so start and stop are hidden. */
+  has_server: boolean;
   port: number;
   autostart: boolean;
   status: Status;
@@ -233,7 +235,7 @@ export interface Snapshot {
   start_at_login: boolean;
   sites: SiteView[];
   services: ServiceView[];
-  database: DatabaseView;
+  database: DatabaseView[];
   apache: ApacheView;
   downloads: DownloadsView;
 }

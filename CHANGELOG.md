@@ -4,6 +4,10 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed
+
+- Database services are supervised per engine instead of as one slot. Every engine listed in `config.json` starts on its own port, and a failure in one engine is recorded for that engine alone while the others and the sites keep running. Settings now shows one card per engine with its own status, port, autostart, password, data folder, and remove action. Start, stop, autostart, backup, and remove commands take the engine key.
+
 ### Added
 
 - Database engines are now an explicit list in `config.json` (`database.engines`) instead of a single implied MariaDB block. Each entry carries its own engine, port, and autostart. MariaDB and MySQL cannot be enabled together, because both are the MySQL family and would fight over the same port; PostgreSQL may run alongside either. Configs written before this change still load as MariaDB with their original port and autostart value, and a hand-edited file that lists MariaDB and MySQL together is rejected on load with a message naming the conflict. (`ab6c983`)

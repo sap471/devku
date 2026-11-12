@@ -18,6 +18,7 @@ import type {
   PhpRemoval,
   PhpRemovalResponse,
   DatabaseRemovalResponse,
+  DatabaseView,
   SiteCommand,
   OpenTarget,
   DialogSpec,
@@ -779,11 +780,18 @@ export async function installDatabase(): Promise<void> {
   }
 }
 
-export async function databaseAction(action: "start_database" | "stop_database"): Promise<void> {
+function databaseView(engine: string): DatabaseView | undefined {
+  return state.snapshot?.database.find((item) => item.engine === engine);
+}
+
+export async function databaseAction(
+  engine: string,
+  action: "start_database" | "stop_database",
+): Promise<void> {
   state.busy = "database";
   state.notice = null;
   try {
-    const next = await invoke<Snapshot>(action);
+    const next = await invoke<Snapshot>(action, { engine });
     applySnapshot(next);
   } catch (err) {
     state.notice = `Gagal mengoperasikan database: ${String(err)}`;
@@ -792,13 +800,14 @@ export async function databaseAction(action: "start_database" | "stop_database")
   }
 }
 
-export async function toggleDatabaseAutostart(): Promise<void> {
-  const db = state.snapshot?.database;
+export async function toggleDatabaseAutostart(engine: string): Promise<void> {
+  const db = databaseView(engine);
   if (!db) return;
   state.busy = "db-autostart";
   try {
     const next = await invoke<Snapshot>("set_database_autostart", {
-      enable: !db.autostart,
+      engine,
+      enabled: !db.autostart,
     });
     applySnapshot(next);
   } catch (err) {
@@ -808,7 +817,7 @@ export async function toggleDatabaseAutostart(): Promise<void> {
   }
 }
 
-export async function resetDatabasePassword(): Promise<void> {
+export async function resetDatabasePassword(engine: string): Promise<void> {
   const answer = await promptDialog({
     title: "Atur password root",
     body: "Password berlaku untuk semua akun root. Kosongkan untuk kembali tanpa password.",
@@ -830,7 +839,10 @@ export async function resetDatabasePassword(): Promise<void> {
   state.notice = null;
 
   try {
-    const next = await invoke<Snapshot>("reset_database_password", { password });
+    const next = await invoke<Snapshot>("reset_database_password", {
+      engine,
+      password,
+    });
     applySnapshot(next);
     state.infoNotice = password ? "Password root diperbarui." : "Password root dikosongkan.";
   } catch (err) {
@@ -840,8 +852,8 @@ export async function resetDatabasePassword(): Promise<void> {
   }
 }
 
-export async function askRemoveDatabase(): Promise<void> {
-  const db = state.snapshot?.database;
+export async function askRemoveDatabase(engine: string): Promise<void> {
+  const db = databaseView(engine);
   if (!db) return;
 
   const canBackup = Boolean(state.snapshot?.running && db.installed && db.initialized);
@@ -883,6 +895,7 @@ export async function askRemoveDatabase(): Promise<void> {
 
   try {
     const result = await invoke<DatabaseRemovalResponse>("remove_database", {
+      engine,
       removeData: Boolean(answer.checked.data),
       backup: Boolean(answer.checked.backup),
     });
@@ -911,8 +924,8 @@ export async function openBackups(): Promise<void> {
   }
 }
 
-export async function openDataFolder(): Promise<void> {
-  const path = state.snapshot?.database.data_path;
+export async function openDataFolder(engine: string): Promise<void> {
+  const path = databaseView(engine)?.data_path;
   if (!path) return;
   try {
     await invoke("open_in", { id: path, target: "explorer" });

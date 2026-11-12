@@ -50,7 +50,8 @@ onMounted(() => {
 const installedPhp = computed(() => state.snapshot?.installed_php ?? []);
 const defaultPhp = computed(() => state.snapshot?.default_php ?? "");
 const phpPath = computed(() => state.snapshot?.php_path);
-const database = computed(() => state.snapshot?.database);
+const database = computed(() => state.snapshot?.database ?? []);
+const databaseRunning = computed(() => database.value.some((db) => db.status === "ready"));
 const composerGlobal = computed(() => state.snapshot?.composer_global);
 const apache = computed(() => state.snapshot?.apache);
 const installingApache = computed(() => state.download?.target === "apache");
@@ -196,11 +197,11 @@ function setTab(tab: SettingsSubTab) {
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 1c3.866 0 7 1.343 7 3v8c0 1.657-3.134 3-7 3s-7-1.343-7-3V4c0-1.657 3.134-3 7-3ZM2 6.435V8c0 1.258 2.532 2.308 6 2.477V8.912C4.532 8.743 2 7.693 2 6.435ZM14 8V6.435c0 1.258-2.532 2.308-6 2.477v1.565c3.468-.169 6-1.219 6-2.477ZM8 2.5C4.686 2.5 2 3.395 2 4.5S4.686 6.5 8 6.5s6-.895 6-2-2.686-2-6-2Zm6 8c0 1.258-2.532 2.308-6 2.477v1.565c3.468-.169 6-1.219 6-2.477V10.5ZM2 10.5V12c0 1.258 2.532 2.308 6 2.477V12.912C4.532 12.743 2 11.693 2 10.435Z"/>
           </svg>
-          <span>Database (MariaDB)</span>
+          <span>Database</span>
           <span
-            v-if="database"
+            v-if="database.length > 0"
             class="status-mini-dot"
-            :class="{ 'dot-ok': database.status === 'ready', 'dot-bad': database.status !== 'ready' }"
+            :class="{ 'dot-ok': databaseRunning, 'dot-bad': !databaseRunning }"
           ></span>
         </button>
 
@@ -484,14 +485,17 @@ function setTab(tab: SettingsSubTab) {
       <section v-else-if="state.settingsTab === 'database'" class="tab-pane">
         <header class="pane-header">
           <div>
-            <h2 class="pane-title">Database Lokal (MariaDB)</h2>
-            <p class="pane-desc">Instance MariaDB bawaan DevKu untuk kebutuhan basis data lokal Anda.</p>
+            <h2 class="pane-title">Database Lokal</h2>
+            <p class="pane-desc">
+              DevKu menyiapkan server database lokal tanpa konfigurasi rumit. MariaDB dan MySQL tidak bisa
+              dipakai bersamaan; PostgreSQL boleh berjalan bersama keduanya.
+            </p>
           </div>
         </header>
 
-        <div v-if="!database?.installed" class="card empty-card">
-          <h3>MariaDB Belum Terpasang</h3>
-          <p>Pasang MariaDB untuk mengaktifkan database lokal otomatis tanpa konfigurasi rumit.</p>
+        <div v-if="database && database.length === 0" class="card empty-card">
+          <h3>Belum Ada Engine Database</h3>
+          <p>Tambahkan MariaDB atau MySQL untuk mengaktifkan database lokal otomatis.</p>
           <button
             class="btn btn-primary"
             type="button"
@@ -503,107 +507,137 @@ function setTab(tab: SettingsSubTab) {
         </div>
 
         <div v-else class="card-stack">
-          <!-- Status & Controls Card -->
-          <div class="card">
+          <div v-for="db in database" :key="db.engine" class="card">
             <div class="card-head">
               <div class="title-with-badge">
-                <h3 class="card-title">{{ database.label }} {{ database.version }}</h3>
+                <h3 class="card-title">{{ db.label }} {{ db.version }}</h3>
                 <span
                   class="status-pill"
                   :class="{
-                    'pill-ready': database.status === 'ready',
-                    'pill-stopped': database.status === 'stopped',
-                    'pill-failed': database.status === 'failed',
+                    'pill-ready': db.status === 'ready',
+                    'pill-stopped': db.status === 'stopped',
+                    'pill-failed': db.status === 'failed',
                   }"
                 >
-                  {{ database.status === 'ready' ? 'Berjalan' : 'Berhenti' }}
+                  {{ db.status === 'ready' ? 'Berjalan' : db.status === 'failed' ? 'Gagal' : 'Berhenti' }}
                 </span>
               </div>
 
               <div class="card-actions">
                 <button
-                  v-if="database.status !== 'ready'"
+                  v-if="!db.installed"
                   class="btn btn-primary btn-sm"
                   type="button"
-                  :disabled="state.busy === 'database'"
-                  @click="databaseAction('start_database')"
+                  :disabled="state.busy === 'install-db'"
+                  @click="installDatabase"
                 >
-                  Nyalakan Database
+                  Pasang {{ db.label }}
                 </button>
-                <button
-                  v-else
-                  class="btn btn-danger-quiet btn-sm"
-                  type="button"
-                  :disabled="state.busy === 'database'"
-                  @click="databaseAction('stop_database')"
-                >
-                  Hentikan
-                </button>
+                <template v-else-if="db.has_server">
+                  <button
+                    v-if="db.status !== 'ready'"
+                    class="btn btn-primary btn-sm"
+                    type="button"
+                    :disabled="state.busy === 'database'"
+                    @click="databaseAction(db.engine, 'start_database')"
+                  >
+                    Nyalakan
+                  </button>
+                  <button
+                    v-else
+                    class="btn btn-danger-quiet btn-sm"
+                    type="button"
+                    :disabled="state.busy === 'database'"
+                    @click="databaseAction(db.engine, 'stop_database')"
+                  >
+                    Hentikan
+                  </button>
+                </template>
               </div>
             </div>
 
             <div class="card-body">
-              <div class="setting-row">
+              <div v-if="db.status === 'failed' && db.detail" class="setting-row">
                 <div class="setting-info">
-                  <span class="setting-name">Port MySQL / MariaDB</span>
-                  <span class="setting-desc">Port koneksi lokal (default 3306). Host: <code>127.0.0.1</code> atau <code>localhost</code></span>
-                </div>
-                <div class="setting-ctrl">
-                  <span class="font-mono bold-text">{{ database.port }}</span>
+                  <span class="setting-name">Galat</span>
+                  <span class="setting-desc font-mono">{{ db.detail }}</span>
                 </div>
               </div>
 
               <div class="setting-row">
                 <div class="setting-info">
-                  <span class="setting-name">Autostart Database</span>
-                  <span class="setting-desc">Nyalakan MariaDB secara otomatis setiap kali DevKu dibuka.</span>
+                  <span class="setting-name">Port</span>
+                  <span class="setting-desc">
+                    Port koneksi lokal (default {{ db.port }}). Host: <code>127.0.0.1</code> atau
+                    <code>localhost</code>
+                  </span>
+                </div>
+                <div class="setting-ctrl">
+                  <span class="font-mono bold-text">{{ db.port }}</span>
+                </div>
+              </div>
+
+              <div v-if="db.has_server" class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-name">Autostart</span>
+                  <span class="setting-desc">Nyalakan {{ db.label }} otomatis setiap kali DevKu dibuka.</span>
                 </div>
                 <div class="setting-ctrl">
                   <button
                     class="btn-toggle"
-                    :class="{ active: database.autostart }"
+                    :class="{ active: db.autostart }"
                     type="button"
-                    @click="toggleDatabaseAutostart"
+                    @click="toggleDatabaseAutostart(db.engine)"
                   >
                     <span class="toggle-slider"></span>
                   </button>
                 </div>
               </div>
 
-              <div class="setting-row">
+              <div v-if="db.engine !== 'postgres'" class="setting-row">
                 <div class="setting-info">
                   <span class="setting-name">Password Root</span>
                   <span class="setting-desc">
-                    Status: {{ database.has_password ? 'Password aktif' : 'Tanpa password (kosong)' }}
+                    Status: {{ db.has_password ? 'Password aktif' : 'Tanpa password (kosong)' }}
                   </span>
                 </div>
                 <div class="setting-ctrl">
-                  <button class="btn btn-outline btn-sm" type="button" @click="resetDatabasePassword">
+                  <button
+                    class="btn btn-outline btn-sm"
+                    type="button"
+                    @click="resetDatabasePassword(db.engine)"
+                  >
                     Ubah Password
                   </button>
                 </div>
               </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-name">Folder Data</span>
+                  <span class="setting-desc font-mono">{{ db.data_path }}</span>
+                </div>
+                <div class="setting-ctrl">
+                  <button class="btn btn-sm btn-quiet" type="button" @click="openDataFolder(db.engine)">
+                    Buka di Explorer
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="db.installed" class="card-foot danger-foot">
+              <span class="foot-warning">Hapus instalasi {{ db.label }} dan seluruh binari</span>
+              <button class="btn btn-sm btn-danger" type="button" @click="askRemoveDatabase(db.engine)">
+                Hapus {{ db.label }}
+              </button>
             </div>
           </div>
 
-          <!-- Folders & Backup Card -->
           <div class="card">
             <div class="card-head">
               <h3 class="card-title">Penyimpanan & Cadangan</h3>
             </div>
             <div class="card-body">
-              <div class="setting-row">
-                <div class="setting-info">
-                  <span class="setting-name">Folder Data Database</span>
-                  <span class="setting-desc font-mono">{{ database.data_path }}</span>
-                </div>
-                <div class="setting-ctrl">
-                  <button class="btn btn-sm btn-quiet" type="button" @click="openDataFolder">
-                    Buka di Explorer
-                  </button>
-                </div>
-              </div>
-
               <div class="setting-row">
                 <div class="setting-info">
                   <span class="setting-name">Folder Cadangan (Backups)</span>
@@ -615,12 +649,6 @@ function setTab(tab: SettingsSubTab) {
                   </button>
                 </div>
               </div>
-            </div>
-            <div class="card-foot danger-foot">
-              <span class="foot-warning">Hapus instalasi database dan seluruh binary MariaDB</span>
-              <button class="btn btn-sm btn-danger" type="button" @click="askRemoveDatabase">
-                Hapus MariaDB
-              </button>
             </div>
           </div>
         </div>
