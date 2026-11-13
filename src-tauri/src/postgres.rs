@@ -178,8 +178,9 @@ impl DatabaseBackend for Postgres {
             name: "postgres".to_string(),
             program: self.binary("postgres.exe"),
             args: vec![
-                format!("-D {}", self.data_dir().display()),
-                format!("-p {port}"),
+                "-D".to_string(),
+                self.data_dir().display().to_string(),
+                format!("--port={port}"),
             ],
             env: Vec::new(),
             cwd: Some(self.bin_dir()),
@@ -341,6 +342,55 @@ mod tests {
         };
         let backend = Postgres::new(paths);
         assert!(backend.bin_dir().ends_with("postgres/bin"));
+    }
+
+    /// `postgres.exe` has no `--pgdata` option (that spelling belongs to
+    /// `initdb` and `pg_ctl`), so the server spec must use `-D` with the data
+    /// directory as a separate argv token. Gluing a flag to its value with a
+    /// space puts the whole thing into one quoted argument instead.
+    #[test]
+    fn postgres_spec_args_are_single_tokens() {
+        let root = std::env::temp_dir().join("devku-pg-spec");
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+        std::fs::create_dir_all(paths.database_data(DatabaseEngine::Postgres)).unwrap();
+        std::fs::write(
+            paths
+                .database_data(DatabaseEngine::Postgres)
+                .join("PG_VERSION"),
+            "18",
+        )
+        .unwrap();
+        std::fs::create_dir_all(paths.database_bin(DatabaseEngine::Postgres)).unwrap();
+        for bin in ["postgres.exe", "initdb.exe"] {
+            std::fs::write(paths.database_bin(DatabaseEngine::Postgres).join(bin), b"").unwrap();
+        }
+
+        let spec = Postgres::new(paths.clone()).spec(5432).unwrap().unwrap();
+        assert_eq!(
+            spec.args.first().map(String::as_str),
+            Some("-D"),
+            "postgres.exe hanya mengenal -D DATADIR, bukan --pgdata"
+        );
+        assert_eq!(
+            spec.args.get(1),
+            Some(
+                &paths
+                    .database_data(DatabaseEngine::Postgres)
+                    .to_string_lossy()
+                    .to_string()
+            ),
+            "DATADIR harus jadi token tersendiri"
+        );
+        assert!(spec.args.iter().any(|arg| arg == "--port=5432"));
+        for arg in &spec.args {
+            assert!(
+                !arg.starts_with("-D ") && !arg.starts_with("-p "),
+                "flag dan nilai tidak boleh digabung spasi: {arg:?}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Runs the real installed `initdb` with exactly the flags production code
