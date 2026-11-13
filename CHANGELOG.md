@@ -4,6 +4,10 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed
+
+- Touchpad scrolling no longer rubber-bands the whole window. A two-finger gesture on a page the root cannot scroll made WebView2 play an elastic overscroll bounce, visibly pulling the titlebar and content down. The shell now sets `overscroll-behavior: none` on `html` and `body`. (`3429866`)
+
 ### Changed
 
 - Database services are supervised per engine instead of as one slot. Every engine listed in `config.json` starts on its own port, and a failure in one engine is recorded for that engine alone while the others and the sites keep running. Settings now shows one card per engine with its own status, port, autostart, password, data folder, and remove action. Start, stop, autostart, backup, and remove commands take the engine key. (`e051862`)
