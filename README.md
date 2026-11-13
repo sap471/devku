@@ -32,6 +32,16 @@ Caddy ──┬── php_fastcgi ──► php-cgi (one pool per PHP version)
 - Apache has its own generated `httpd.conf` and its own Settings tab, separate from the Caddyfile. DevKu installs it itself from Apache Lounge with SHA-256 verification, and `httpd` starts only while at least one site uses it.
 - Processes are supervised from within the DevKu binary. If a `php-cgi` instance exits unexpectedly, it is restarted with exponential backoff.
 
+## Databases
+
+DevKu manages local database servers from Settings > Database:
+
+- **MariaDB** (11.4 LTS) is the default. It is downloaded from `archive.mariadb.org` and verified against the published `sha256sums.txt`.
+- **PostgreSQL** (18.6) can be installed alongside MariaDB. It comes from the EDB Windows binaries zip; EDB publishes no checksum for it, so the archive's digest is recorded at download time and verified on every later reuse. The superuser authenticates with a password (`scram-sha-256`), the server listens on loopback only, and backups use plain-format `pg_dump`.
+- **MySQL Community Server** is planned but not implemented yet. The download source has been verified (`cdn.mysql.com` with the published MD5 sidecar, pinned to 8.4.13 LTS); implementation follows.
+
+MariaDB and MySQL are mutually exclusive (both speak the MySQL protocol on port 3306, so choosing one is required). PostgreSQL runs alongside either on port 5432. Every engine has its own binaries under `engines/database/<engine>`, its own data under `databases/<engine>`, and its own generated config and stored password under `runtime/<engine>`. An engine that fails to start never blocks the sites or the other engines; its error is shown on its own card.
+
 ## Where Data Lives
 
 Three locations with separate jobs:
@@ -81,4 +91,4 @@ Package manager: **Bun**. See [`AGENTS.md`](AGENTS.md).
 
 ## License
 
-MIT, see [`LICENSE`](LICENSE). The third-party engines DevKu downloads (Caddy, Apache httpd, PHP, MariaDB, Bun, Composer) keep their own licenses and come from their original sources; DevKu does not redistribute them.
+MIT, see [`LICENSE`](LICENSE). The third-party engines DevKu downloads (Caddy, Apache httpd, PHP, MariaDB, PostgreSQL, Bun, Composer) keep their own licenses and come from their original sources; DevKu does not redistribute them.
