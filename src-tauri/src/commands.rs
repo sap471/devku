@@ -986,10 +986,11 @@ pub async fn install_database(
     app: AppHandle,
     state: State<'_, AppState>,
     slot: State<'_, download::Slot>,
+    engine: DatabaseEngine,
 ) -> Result<Snapshot, String> {
     let paths = session_paths(&state).await?;
     let cancel = slot.begin().map_err(error)?;
-    let result = install_database_inner(&app, &paths, &cancel).await;
+    let result = install_database_inner(&app, &paths, &cancel, engine).await;
     slot.finish();
     result.map_err(error)?;
 
@@ -997,11 +998,24 @@ pub async fn install_database(
     let session = guard
         .as_mut()
         .ok_or_else(|| unavailable(&state.boot_error))?;
-    session.prepare_database().await.map_err(error)?;
+    session.prepare_database(engine).await.map_err(error)?;
     Ok(session.snapshot().await)
 }
 
 async fn install_database_inner(
+    app: &AppHandle,
+    paths: &Paths,
+    cancel: &AtomicBool,
+    engine: DatabaseEngine,
+) -> anyhow::Result<()> {
+    match engine {
+        DatabaseEngine::Mariadb => install_mariadb(app, paths, cancel).await,
+        DatabaseEngine::Postgres => install_postgres(app, paths, cancel).await,
+        DatabaseEngine::Mysql => anyhow::bail!("MySQL belum didukung di versi ini"),
+    }
+}
+
+async fn install_mariadb(
     app: &AppHandle,
     paths: &Paths,
     cancel: &AtomicBool,
@@ -1044,6 +1058,53 @@ async fn install_database_inner(
     }
 
     report(app, "mariadb", version, 0, None, "selesai");
+    Ok(())
+}
+
+async fn install_postgres(
+    app: &AppHandle,
+    paths: &Paths,
+    cancel: &AtomicBool,
+) -> anyhow::Result<()> {
+    let client = download::client()?;
+    let version = crate::postgres::POSTGRES_VERSION;
+    let filename = format!("postgresql-{version}-1-windows-x64-binaries.zip");
+    report(app, "postgres", version, 0, None, "daftar");
+
+    // EDB publishes no checksum for the zip, so the recorded-digest path
+    // applies: `expected = None` makes `download` trust a previously recorded
+    // sha256 sidecar and re-verify on each fresh download.
+    let archive = paths.downloads().join(&filename);
+    download::download(
+        &client,
+        &crate::postgres::archive_url(version),
+        &archive,
+        None,
+        cancel,
+        |received, total| report(app, "postgres", version, received, total, "unduh"),
+    )
+    .await?;
+
+    report(app, "postgres", version, 0, None, "pasang");
+
+    let dir = paths.database_dir(DatabaseEngine::Postgres);
+    let zip = archive.clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::archive::extract(&zip, &dir)?;
+        Ok(())
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("pemasangan terhenti: {err}"))??;
+
+    if !paths
+        .database_bin(DatabaseEngine::Postgres)
+        .join("initdb.exe")
+        .exists()
+    {
+        anyhow::bail!("zip PostgreSQL tidak berisi bin/initdb.exe");
+    }
+
+    report(app, "postgres", version, 0, None, "selesai");
     Ok(())
 }
 

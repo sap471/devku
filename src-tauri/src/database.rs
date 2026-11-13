@@ -499,7 +499,7 @@ pub fn backend_for(paths: &Paths, engine: DatabaseEngine) -> Result<Box<dyn Data
         DatabaseEngine::Mariadb | DatabaseEngine::Mysql => {
             Box::new(Mariadb::for_engine(paths.clone(), engine))
         }
-        DatabaseEngine::Postgres => bail!("engine postgres belum tersedia di versi ini"),
+        DatabaseEngine::Postgres => Box::new(crate::postgres::Postgres::new(paths.clone())),
     };
     Ok(backend)
 }

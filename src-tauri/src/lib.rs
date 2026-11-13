@@ -19,6 +19,7 @@ pub mod path_env;
 pub mod paths;
 pub mod php;
 pub mod ports;
+pub mod postgres;
 pub mod proc;
 pub mod runtime;
 pub mod runtime_detect;

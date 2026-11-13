@@ -529,7 +529,7 @@ function setTab(tab: SettingsSubTab) {
                   class="btn btn-primary btn-sm"
                   type="button"
                   :disabled="state.busy === 'install-db'"
-                  @click="installDatabase"
+                  @click="installDatabase(db.engine)"
                 >
                   Pasang {{ db.label }}
                 </button>

@@ -766,15 +766,15 @@ function summarizeRemoval(removal: PhpRemoval): string {
   return parts.join(" ");
 }
 
-export async function installDatabase(): Promise<void> {
+export async function installDatabase(engine = "mariadb"): Promise<void> {
   state.busy = "install-db";
   state.notice = null;
   try {
-    const next = await invoke<Snapshot>("install_database");
+    const next = await invoke<Snapshot>("install_database", { engine });
     applySnapshot(next);
-    state.infoNotice = "MariaDB berhasil dipasang.";
+    state.infoNotice = `${engine} berhasil dipasang.`;
   } catch (err) {
-    state.notice = `Gagal memasang MariaDB: ${String(err)}`;
+    state.notice = `Gagal memasang ${engine}: ${String(err)}`;
   } finally {
     state.busy = null;
   }

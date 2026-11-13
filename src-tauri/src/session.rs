@@ -905,19 +905,19 @@ impl Session {
 
     /// Prepares the MariaDB datadir. Called after the binaries are extracted,
     /// and safe to repeat.
-    pub async fn prepare_database(&mut self) -> Result<()> {
-        let backend = Mariadb::new(self.paths.clone());
+    pub async fn prepare_database(&mut self, engine: DatabaseEngine) -> Result<()> {
+        let backend = database::backend_for(&self.paths, engine)?;
         if !backend.is_installed() {
-            bail!("MariaDB belum terpasang");
+            bail!("{} belum terpasang", backend.label());
         }
 
-        backend.initialize(self.config.database.port_of(DatabaseEngine::Mariadb))?;
-        if !self.paths.database_secret(DatabaseEngine::Mariadb).exists() {
-            backend.store_password("")?;
+        backend.initialize(self.config.database.port_of(engine))?;
+        if engine != DatabaseEngine::Postgres && !self.paths.database_secret(engine).exists() {
+            Mariadb::for_engine(self.paths.clone(), engine).store_password("")?;
         }
 
-        if self.config.database.autostart_of(DatabaseEngine::Mariadb) && self.runtime.is_some() {
-            self.start_database().await?;
+        if self.config.database.autostart_of(engine) && self.runtime.is_some() {
+            self.start_database_engine(engine).await?;
         }
         Ok(())
     }
