@@ -111,6 +111,7 @@ pub fn run() {
             commands::remove_php,
             commands::remove_all_php,
             commands::install_database,
+            commands::add_database_engine,
             commands::start_database,
             commands::stop_database,
             commands::set_database_autostart,

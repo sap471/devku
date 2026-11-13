@@ -780,6 +780,20 @@ export async function installDatabase(engine = "mariadb"): Promise<void> {
   }
 }
 
+export async function addDatabaseEngine(engine = "postgres"): Promise<void> {
+  state.busy = "add-db";
+  state.notice = null;
+  try {
+    const next = await invoke<Snapshot>("add_database_engine", { engine });
+    applySnapshot(next);
+    state.infoNotice = "PostgreSQL ditambahkan. Pasang binernya dari kartu di bawah.";
+  } catch (err) {
+    state.notice = `Gagal menambah ${engine}: ${String(err)}`;
+  } finally {
+    state.busy = null;
+  }
+}
+
 function databaseView(engine: string): DatabaseView | undefined {
   return state.snapshot?.database.find((item) => item.engine === engine);
 }

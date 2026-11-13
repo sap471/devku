@@ -13,6 +13,7 @@ import {
   loadPhpCatalog,
   installPhp,
   installDatabase,
+  addDatabaseEngine,
   databaseAction,
   toggleDatabaseAutostart,
   resetDatabasePassword,
@@ -491,6 +492,15 @@ function setTab(tab: SettingsSubTab) {
               dipakai bersamaan; PostgreSQL boleh berjalan bersama keduanya.
             </p>
           </div>
+          <button
+            v-if="!database.some((db) => db.engine === 'postgres')"
+            class="btn btn-sm"
+            type="button"
+            :disabled="state.busy === 'add-db'"
+            @click="addDatabaseEngine('postgres')"
+          >
+            Tambah PostgreSQL
+          </button>
         </header>
 
         <div v-if="database && database.length === 0" class="card empty-card">

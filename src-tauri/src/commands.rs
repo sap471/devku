@@ -1137,6 +1137,20 @@ pub async fn stop_database(
 }
 
 #[tauri::command]
+pub async fn add_database_engine(
+    state: State<'_, AppState>,
+    engine: DatabaseEngine,
+) -> Result<Snapshot, String> {
+    let mut guard = state.session.lock().await;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+
+    session.add_database_engine(engine).await.map_err(error)?;
+    Ok(session.snapshot().await)
+}
+
+#[tauri::command]
 pub async fn set_database_autostart(
     state: State<'_, AppState>,
     engine: DatabaseEngine,
