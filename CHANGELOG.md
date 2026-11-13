@@ -6,6 +6,8 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Fixed
 
+- PostgreSQL failing to start with "database gagal siap: belum siap setelah 30s". The server spec passed `-D <datadir>` and `-p <port>` as single argv strings, so `postgres.exe` looked for a directory literally named `" C:/Users/.../databases/postgres"` inside its `bin` folder and exited on every restart. The data directory is now passed as `-D DATADIR`, two separate arguments, which is the only form `postgres.exe` accepts. (`fbe114e`)
+
 - PostgreSQL `initdb` failing with "invalid authentication method" on the first click of Pasang. The backend passed `-A scram-sha-256` and similar flags as a single argv string with the flag and value glued together by a space; `Command::args` forwarded each element verbatim, so `initdb` received `" scram-sha-256"` (leading space) and rejected it. All four argument lists in the postgres backend now use the `--long=value` form, which carries no ambiguity. Additionally, the password file written for `initdb` was always empty; `initdb` refuses an empty pwfile, so a random password is now generated and stored before `initdb` runs. (`db7c75b`)
 
 - Touchpad scrolling no longer rubber-bands the whole window. A two-finger gesture on a page the root cannot scroll made WebView2 play an elastic overscroll bounce, visibly pulling the titlebar and content down. The shell now sets `overscroll-behavior: none` on `html` and `body`. (`3429866`)
