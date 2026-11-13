@@ -192,7 +192,25 @@ impl Paths {
             std::fs::create_dir_all(&dir)
                 .with_context(|| format!("gagal membuat {}", dir.display()))?;
         }
+        self.migrate_legacy_mariadb();
         Ok(())
+    }
+
+    /// Installs before the engine-scoped layout put MariaDB directly under
+    /// `engines/mariadb`. Move the folder once so an upgrade keeps the binaries
+    /// instead of making the user download them again. Best effort: a locked
+    /// folder (a mysqld started outside DevKu) leaves it in place and the
+    /// engine just reports uninstalled.
+    fn migrate_legacy_mariadb(&self) {
+        let legacy = self.engines().join("mariadb");
+        let target = self.database_dir(DatabaseEngine::Mariadb);
+        if !legacy.is_dir() || target.exists() {
+            return;
+        }
+        if let Some(parent) = target.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::rename(&legacy, &target);
     }
 }
 
@@ -247,5 +265,26 @@ mod tests {
             paths.database_secret(DatabaseEngine::Mariadb),
             paths.database_secret(DatabaseEngine::Postgres)
         );
+    }
+
+    #[test]
+    fn legacy_mariadb_folder_moves_into_engine_scope() {
+        let root = std::env::temp_dir().join(format!("devku-paths-mig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        let legacy_bin = paths.engines().join("mariadb").join("bin");
+        std::fs::create_dir_all(&legacy_bin).unwrap();
+        std::fs::write(legacy_bin.join("mysqld.exe"), "stub").unwrap();
+
+        paths.ensure().unwrap();
+
+        assert!(
+            paths
+                .database_bin(DatabaseEngine::Mariadb)
+                .join("mysqld.exe")
+                .is_file()
+        );
+        assert!(!paths.engines().join("mariadb").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
