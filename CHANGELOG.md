@@ -10,6 +10,8 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Changed
 
+- The application identifier changed from `com.devku.app` to `id.devku.desktop`, matching the domain the project actually lives under instead of claiming `devku.com`. The identifier only names the WebView2 profile folder, so this renames `%LOCALAPPDATA%\id.devku.desktop` (a cache that regenerates itself); app state in `%APPDATA%\DevKu` is untouched. Installer, uninstaller, autostart, and shortcuts do not use the identifier and keep working. (`c950858`)
+
 - Database services are supervised per engine instead of as one slot. Every engine listed in `config.json` starts on its own port, and a failure in one engine is recorded for that engine alone while the others and the sites keep running. Settings now shows one card per engine with its own status, port, autostart, password, data folder, and remove action. Start, stop, autostart, backup, and remove commands take the engine key. (`e051862`)
 - On the first start after this update, an existing MariaDB install moves from `engines/mariadb` to `engines/database/mariadb` automatically, so the binaries are kept and no re-download happens. (`82e512d`)
 - MySQL Community Server is deliberately not implemented in this batch. The download source has since been verified (`cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.13-winx64.zip`, with the published MD5 sidecar on the same CDN), and the pin is decided: 8.4.13 LTS. A follow-up task implements it on the shared MariaDB driver. Until then, selecting MySQL in the configuration is refused with a clear error instead of silently running another engine.
