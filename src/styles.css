@@ -37,6 +37,10 @@
 html,
 body {
   height: 100%;
+  /* A touchpad gesture on a page the root cannot scroll makes WebView2
+     rubber-band the whole window, visibly bouncing the titlebar down.
+     Disabling overscroll keeps the shell fixed. */
+  overscroll-behavior: none;
 }
 
 body {
