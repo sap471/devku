@@ -1611,6 +1611,15 @@ mod tests {
         assert_eq!(entry.port, 5432);
         assert!(!entry.autostart);
 
+        // The legacy entry must survive the rewrite with its original values.
+        let legacy = session
+            .config()
+            .database
+            .entry(DatabaseEngine::Mariadb)
+            .unwrap();
+        assert_eq!(legacy.port, 3306);
+        assert!(legacy.autostart);
+
         let reloaded = Config::load(&paths).unwrap();
         assert!(reloaded.database.entry(DatabaseEngine::Mariadb).is_some());
         assert!(reloaded.database.entry(DatabaseEngine::Postgres).is_some());
