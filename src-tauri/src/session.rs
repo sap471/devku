@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Backend, Config, DbEngineSettings, Site};
+use crate::config::{Backend, Config, DatabaseSettings, DbEngineSettings, Site};
 use crate::database::{self, Conn, DatabaseBackend, DatabaseEngine, Mariadb};
 use crate::detect;
 use crate::paths::Paths;
@@ -965,6 +965,34 @@ impl Session {
         Ok(())
     }
 
+    /// Adds an engine to the configured list. The card, install button, and
+    /// supervision all key off this list, so this is the only door a new engine
+    /// needs. MySQL stays out until its backend exists.
+    pub async fn add_database_engine(&mut self, engine: DatabaseEngine) -> Result<()> {
+        if engine == DatabaseEngine::Mysql {
+            bail!("MySQL belum didukung di versi ini");
+        }
+        if self.config.database.entry(engine).is_some() {
+            bail!("{} sudah ada di daftar engine", engine.key());
+        }
+
+        // Validate the candidate list before touching the live one: a rejected
+        // add must leave the config exactly as it was.
+        let mut candidate = DatabaseSettings {
+            engines: self.config.database.engines.clone(),
+        };
+        candidate.engines.push(DbEngineSettings {
+            engine,
+            port: engine.default_port(),
+            autostart: false,
+        });
+        candidate.validate()?;
+
+        self.config.database = candidate;
+        self.config.save(&self.paths)?;
+        self.refresh().await
+    }
+
     /// The autostart checkbox decides whether the database starts and stops with
     /// the other services.
     pub async fn set_database_autostart(
@@ -1551,6 +1579,104 @@ mod tests {
         assert_eq!(session.config().php.active, "8.3.0");
         assert_eq!(removal.default_php, "8.3.0");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn add_database_engine_appends_postgres_with_defaults() {
+        let root = std::env::temp_dir().join(format!("devku-add-db-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+
+        // A config in the legacy single-engine shape, like the one on a real
+        // upgraded machine, must still gain the entry and rewrite cleanly.
+        std::fs::write(
+            paths.config_file(),
+            r#"{"version":1,"backend":"caddy","tld":"localhost","autostart":true,"database":{"port":3306,"autostart":true}}"#,
+        )
+        .unwrap();
+
+        let mut session = Session::new(paths.clone(), None).unwrap();
+        session
+            .add_database_engine(DatabaseEngine::Postgres)
+            .await
+            .unwrap();
+
+        let entry = session
+            .config()
+            .database
+            .entry(DatabaseEngine::Postgres)
+            .unwrap();
+        assert_eq!(entry.port, 5432);
+        assert!(!entry.autostart);
+
+        let reloaded = Config::load(&paths).unwrap();
+        assert!(reloaded.database.entry(DatabaseEngine::Mariadb).is_some());
+        assert!(reloaded.database.entry(DatabaseEngine::Postgres).is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn add_database_engine_refuses_duplicates_and_mysql() {
+        let root = std::env::temp_dir().join(format!("devku-add-db2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+        Config::default().save(&paths).unwrap();
+        let mut session = Session::new(paths.clone(), None).unwrap();
+
+        assert!(
+            session
+                .add_database_engine(DatabaseEngine::Mysql)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("belum didukung")
+        );
+
+        session
+            .add_database_engine(DatabaseEngine::Postgres)
+            .await
+            .unwrap();
+        assert!(
+            session
+                .add_database_engine(DatabaseEngine::Postgres)
+                .await
+                .is_err()
+        );
+        assert_eq!(session.config().database.engines.len(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn add_database_engine_respects_mysql_family_exclusivity() {
+        let root = std::env::temp_dir().join(format!("devku-add-db3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+        let mut config = Config::default();
+        config.database.engines = vec![DbEngineSettings {
+            engine: DatabaseEngine::Mysql,
+            port: 3306,
+            autostart: false,
+        }];
+        config.save(&paths).unwrap();
+        let mut session = Session::new(paths.clone(), None).unwrap();
+
+        assert!(
+            session
+                .add_database_engine(DatabaseEngine::Mariadb)
+                .await
+                .is_err()
+        );
+        assert!(
+            session
+                .config()
+                .database
+                .entry(DatabaseEngine::Mariadb)
+                .is_none()
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
