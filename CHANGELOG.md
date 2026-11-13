@@ -18,6 +18,7 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Added
 
+- PostgreSQL can now be added from Pengaturan > Database with a "Tambah PostgreSQL" button instead of hand-editing `config.json`. The button shows only while no PostgreSQL entry exists; the new entry starts on port 5432 with autostart off. MySQL stays out of the offer until its backend is implemented. New command: `add_database_engine`.
 - PostgreSQL is now supported as a second database engine. It installs from the EDB Windows binaries zip (pinned to 18.6), initializes with `initdb -A scram-sha-256` so the superuser authenticates with a password just like MariaDB, binds only loopback, and can run alongside MariaDB or MySQL on its own port 5432. Backups use `pg_dump -Fp` (plain SQL), keeping the same `.sql` backup contract as MariaDB. EDB publishes no checksum for its zip, so the recorded-digest verification path is used, the same way Bun's archive is handled. (`57e199a`)
 
 - Database engines are now an explicit list in `config.json` (`database.engines`) instead of a single implied MariaDB block. Each entry carries its own engine, port, and autostart. MariaDB and MySQL cannot be enabled together, because both are the MySQL family and would fight over the same port; PostgreSQL may run alongside either. Configs written before this change still load as MariaDB with their original port and autostart value, and a hand-edited file that lists MariaDB and MySQL together is rejected on load with a message naming the conflict. (`ab6c983`)
