@@ -15,3 +15,5 @@ Task 4: complete (commits 2e5e4db..46454e3, tests: bun run check → 0 errors, b
 
 Task 5: complete (commits ae63251..2675d89, tests: bun run check → 0 errors, bun run build → 0 errors). Replaced flat nav with 3 collapsible groups (Runtime, Data & Server, Aplikasi). Added auto-expand so selecting a tab forces its parent group open. Renamed tab `'server'` to `'caddy'`, mounted `LogsPane` for `'logs'`, added "Lihat Log" buttons on database cards, caddy header, apache header, and a "Buka Log" link on failed database cards. Typecheck and Vite build both clean.
 
+Task 6: complete (tests: none, documentation only). CHANGELOG `[Unreleased]` now has two Added lines (log tab, sidebar groups) and one Changed line (caddy tab move and key rename) carrying the commit hashes from Tasks 1-5.
+
