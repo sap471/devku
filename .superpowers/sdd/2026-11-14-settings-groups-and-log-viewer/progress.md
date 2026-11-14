@@ -38,3 +38,5 @@ Final: minor (deferred): M9 `formatTime` treats epoch 0 as unknown.
 Final: minor (deferred): M11 `classify` sends unknown `*.log` names to the Situs group, so a future `redis.log` would be mislabelled.
 Final: minor (deferred): M12 the separator guard is duplicated in `session.rs` and `commands.rs`.
 
+
+Task 7: complete (commits 014ded3, tests: cargo test → 155 passed 8 ignored; clippy 0 warnings; fmt clean; bun run check → 0; bun run build → 0; bun tauri build → installer 15:22:44). Live check of the running installer is left to the user: the Log tab lists 19 log files in the real runtime/logs folder, and the reviewer's Focus 1-5 checks passed on the real files.
