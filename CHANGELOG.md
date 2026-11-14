@@ -6,6 +6,10 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Fixed
 
+- "Buka di Explorer" on a database card failed with "invalid args `kind` for command `open_in`". The store called the command without its required `kind` argument. The button now opens that engine's data folder through a new `db` kind, and the site "Buka di" menu, which had the same missing argument, passes `site`. (`4d58fc8`)
+
+- PostgreSQL wrote `postgresql.conf` and `pg_hba.conf` under `runtime/postgres/`, where the server never reads them, so it ignored DevKu's port and auth rules and ran on its own defaults. Both files now live in the datadir. Backups and restores also logged in as `root`, a role PostgreSQL does not have; the superuser is now a backend property, `postgres` for PostgreSQL and `root` for MariaDB. Removing an engine's data now happens before the binaries are deleted, so a failed wipe no longer leaves a half-removed install. (`4d58fc8`)
+
 - PostgreSQL failing to start with "database gagal siap: belum siap setelah 30s". The server spec passed `-D <datadir>` and `-p <port>` as single argv strings, so `postgres.exe` looked for a directory literally named `" C:/Users/.../databases/postgres"` inside its `bin` folder and exited on every restart. The data directory is now passed as `-D DATADIR`, two separate arguments, which is the only form `postgres.exe` accepts. (`fbe114e`)
 
 - PostgreSQL `initdb` failing with "invalid authentication method" on the first click of Pasang. The backend passed `-A scram-sha-256` and similar flags as a single argv string with the flag and value glued together by a space; `Command::args` forwarded each element verbatim, so `initdb` received `" scram-sha-256"` (leading space) and rejected it. All four argument lists in the postgres backend now use the `--long=value` form, which carries no ambiguity. Additionally, the password file written for `initdb` was always empty; `initdb` refuses an empty pwfile, so a random password is now generated and stored before `initdb` runs. (`db7c75b`)
