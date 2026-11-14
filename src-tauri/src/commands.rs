@@ -1397,6 +1397,22 @@ pub async fn open_in(
             .ok_or_else(|| unavailable(&state.boot_error))?;
 
         match kind.as_str() {
+            "log" => {
+                let id = id.ok_or_else(|| "log tidak dipilih".to_string())?;
+                if id.contains('/') || id.contains('\\') || id.contains("..") {
+                    return Err("nama log tidak valid".to_string());
+                }
+                let path = session.paths().logs().join(format!("{id}.log"));
+                if !path.exists() {
+                    return Err(format!("log {id} belum ada"));
+                }
+                // A log opens in its own app, not in a folder, so the folder
+                // launcher does not apply.
+                return tokio::task::spawn_blocking(move || open_file(&path))
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map_err(error);
+            }
             "data" => session.paths().root.clone(),
             "workspace" => {
                 // Titlebar and Settings buttons must work before
@@ -1465,6 +1481,34 @@ pub async fn tail_log(
         .as_ref()
         .ok_or_else(|| unavailable(&state.boot_error))?;
     session.tail_log(&name, lines.unwrap_or(200)).map_err(error)
+}
+
+/// Opens one file with its default app. Folders go through `launcher::open`,
+/// which only knows how to open folders in a known target.
+fn open_file(path: &std::path::Path) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        let mut command = std::process::Command::new("explorer.exe");
+        command.arg(path);
+        crate::subprocess::hide_console_std(&mut command);
+        command.spawn()?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        crate::launcher::open(path.parent().unwrap_or(path), "explorer")
+    }
+}
+
+#[tauri::command]
+pub async fn log_sources(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::logs::LogSource>, String> {
+    let guard = state.session.lock().await;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| unavailable(&state.boot_error))?;
+    Ok(session.log_sources())
 }
 
 #[cfg(test)]

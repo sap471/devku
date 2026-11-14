@@ -88,6 +88,7 @@ pub fn run() {
             commands::set_site_enabled,
             commands::detect_project,
             commands::tail_log,
+            commands::log_sources,
             commands::runtimes,
             commands::open_terminal,
             commands::write_terminal,

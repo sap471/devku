@@ -1306,16 +1306,15 @@ impl Session {
     }
 
     pub fn tail_log(&self, name: &str, lines: usize) -> Result<Vec<String>> {
-        let path = self.paths.logs().join(format!("{name}.log"));
-        if !path.exists() {
-            return Ok(Vec::new());
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
+            bail!("nama log tidak valid");
         }
+        // A name with a separator must not escape the logs folder.
+        crate::logs::tail(&self.paths.logs().join(format!("{name}.log")), lines)
+    }
 
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("gagal membaca {}", path.display()))?;
-        let all: Vec<&str> = raw.lines().collect();
-        let start = all.len().saturating_sub(lines);
-        Ok(all[start..].iter().map(|line| line.to_string()).collect())
+    pub fn log_sources(&self) -> Vec<crate::logs::LogSource> {
+        crate::logs::sources(&self.paths.logs())
     }
 
     fn default_php(&self) -> Result<String> {
@@ -1536,6 +1535,32 @@ mod tests {
 
         session.set_default_php("7.4.33").unwrap();
         assert_eq!(session.config().php.active, "7.4.33");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn log_sources_and_tail_read_only_from_the_logs_folder() {
+        let root = std::env::temp_dir().join("devku-session-logs");
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+        Config::default().save(&paths).unwrap();
+        std::fs::create_dir_all(paths.logs()).unwrap();
+        std::fs::write(paths.logs().join("postgres.log"), "one\ntwo\n").unwrap();
+        std::fs::write(paths.logs().join("secret.txt"), "x").unwrap();
+
+        let session = Session::new(paths.clone(), None).unwrap();
+        let found = session.log_sources();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "postgres.log");
+        assert_eq!(
+            session.tail_log("postgres", 1).unwrap(),
+            vec!["two".to_string()]
+        );
+
+        // A name with a path separator must not escape the logs folder.
+        assert!(session.tail_log("../config", 5).is_err());
 
         let _ = std::fs::remove_dir_all(&root);
     }
