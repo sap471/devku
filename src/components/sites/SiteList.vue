@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { state, selectSite, toggleSite, syncWorkspace, STATUS_WORD, frameworkLabel } from "../../store/devku";
+import { state, selectSite, toggleSite, syncWorkspace, frameworkLabel } from "../../store/devku";
 import type { SiteView } from "../../types";
 
 const searchQuery = ref("");

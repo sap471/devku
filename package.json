@@ -12,9 +12,9 @@
   "homepage": "https://github.com/sap471/devku#readme",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit",
+    "check": "vue-tsc --noEmit",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
@@ -32,6 +32,7 @@
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^6.0.10",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vue-tsc": "^3.3.14"
   }
 }

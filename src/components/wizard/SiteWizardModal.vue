@@ -2,7 +2,7 @@
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { state, selectSite, loadLog } from "../../store/devku";
+import { state, selectSite } from "../../store/devku";
 import type { Detection, Snapshot } from "../../types";
 
 const step = ref<1 | 2 | 3>(1);

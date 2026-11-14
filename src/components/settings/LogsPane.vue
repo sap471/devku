@@ -21,11 +21,6 @@ const liveLog = ref<boolean>(false);
 let liveTimer: number | null = null;
 let liveBusy = false;
 
-const currentSource = computed<LogSource | null>(() => {
-  if (!state.serviceLogFor) return null;
-  return state.logSources.find((s) => s.name === state.serviceLogFor) ?? null;
-});
-
 const groupedSources = computed<Record<string, LogSource[]>>(() => {
   const groups: Record<string, LogSource[]> = {
     server: [],

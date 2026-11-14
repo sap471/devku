@@ -629,10 +629,10 @@ function setTab(tab: SettingsSubTab) {
           <h3>Belum Ada Engine Database</h3>
           <p>Tambahkan MariaDB atau MySQL untuk mengaktifkan database lokal otomatis.</p>
           <button
-            class="btn btn-primary"
             type="button"
+            class="btn btn-primary"
             :disabled="state.busy === 'install-db'"
-            @click="installDatabase"
+            @click="installDatabase()"
           >
             {{ state.busy === 'install-db' ? 'Memasang MariaDB...' : 'Pasang MariaDB Sekarang' }}
           </button>

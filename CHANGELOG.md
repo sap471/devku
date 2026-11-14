@@ -22,6 +22,8 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Changed
 
+- `bun run check` and `bun run build` now run `vue-tsc` instead of plain `tsc`, so mistakes inside Vue components are caught before a build. It immediately found the missing `reactive` import that broke Pengaturan, plus five unused imports and a click handler bound to the wrong signature. Those are fixed. (`4ccd2e9`, hash below)
+
 - The Caddy settings tab moved to the sidebar's Data & Server group and its internal key changed from `server` to `caddy`. Nothing about the pane itself changed. (`2675d89`)
 
 - The application identifier changed from `com.devku.app` to `id.devku.desktop`, matching the domain the project actually lives under instead of claiming `devku.com`. The identifier only names the WebView2 profile folder, so this renames `%LOCALAPPDATA%\id.devku.desktop` (a cache that regenerates itself); app state in `%APPDATA%\DevKu` is untouched. Installer, uninstaller, autostart, and shortcuts do not use the identifier and keep working. (`c950858`)

@@ -8,8 +8,6 @@ import {
   stopAll,
   trustCaddy,
   openWorkspace,
-  STATUS_WORD,
-  type MainTab,
 } from "../store/devku";
 import * as terminalPanel from "../terminal";
 
