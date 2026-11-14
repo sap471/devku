@@ -6,6 +6,8 @@ All user-facing changes are documented here. Format follows [Keep a Changelog](h
 
 ### Fixed
 
+- Opening Pengaturan threw "reactive is not defined" and left the page blank: the grouped sidebar uses `reactive` for the open/closed group state, but the import was never added. The pane renders again. (commit hash below)
+
 - The install progress banner for a database never went away: the store kept the last `download://progress` event ("selesai", no total) after the command returned, so the bar stayed filled as if the install were still running. `installDatabase` now seeds and clears that state around the call, so the banner disappears when the install ends, whether it succeeded or failed. (`17d758b`)
 
 - "Buka di Explorer" on a database card failed with "invalid args `kind` for command `open_in`". The store called the command without its required `kind` argument. The button now opens that engine's data folder through a new `db` kind, and the site "Buka di" menu, which had the same missing argument, passes `site`. (`4d58fc8`)
