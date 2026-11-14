@@ -769,6 +769,10 @@ function summarizeRemoval(removal: PhpRemoval): string {
 export async function installDatabase(engine = "mariadb"): Promise<void> {
   state.busy = "install-db";
   state.notice = null;
+  // The backend reports every stage through `download://progress`, and the
+  // banner keeps the last event. Without seeding and clearing it here the bar
+  // would stay on the final "selesai" event forever.
+  state.download = { target: engine, version: "", received: 0, total: null, stage: "daftar" };
   try {
     const next = await invoke<Snapshot>("install_database", { engine });
     applySnapshot(next);
@@ -777,6 +781,7 @@ export async function installDatabase(engine = "mariadb"): Promise<void> {
     state.notice = `Gagal memasang ${engine}: ${String(err)}`;
   } finally {
     state.busy = null;
+    state.download = null;
   }
 }
 
