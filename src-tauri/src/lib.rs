@@ -15,6 +15,7 @@ pub mod extensions;
 pub mod hosts;
 pub mod launcher;
 pub mod location;
+pub mod logs;
 pub mod path_env;
 pub mod paths;
 pub mod php;
