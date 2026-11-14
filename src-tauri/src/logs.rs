@@ -90,7 +90,13 @@ pub fn sources(log_dir: &Path) -> Vec<LogSource> {
 }
 
 pub fn tail(path: &Path, lines: usize) -> Result<Vec<String>> {
-    if lines == 0 || !path.exists() {
+    if lines == 0 {
+        return Ok(Vec::new());
+    }
+
+    // A log the service has not written yet is the normal first-run case, so
+    // a missing file reads as an empty log rather than a failure.
+    if !path.exists() {
         return Ok(Vec::new());
     }
 
@@ -98,21 +104,31 @@ pub fn tail(path: &Path, lines: usize) -> Result<Vec<String>> {
         std::fs::File::open(path).with_context(|| format!("gagal membuka {}", path.display()))?;
     let len = file.metadata()?.len();
     let start = len.saturating_sub(TAIL_WINDOW);
-    file.seek(SeekFrom::Start(start))?;
-
     let mut buffer = Vec::new();
-    file.take(TAIL_WINDOW)
+    file.seek(SeekFrom::Start(start))?;
+    (&mut file)
+        .take(TAIL_WINDOW)
         .read_to_end(&mut buffer)
         .with_context(|| format!("gagal membaca {}", path.display()))?;
 
-    // Starting mid-file lands mid-line; that first fragment is not a log line.
-    if start > 0 {
+    // Starting mid-file lands mid-line; that fragment is not a log line, so
+    // everything up to and including the first newline goes. If that leaves
+    // nothing, the last line is longer than the window itself, and reading
+    // from the start is the only way to show it whole.
+    let cut = start > 0;
+    if cut {
         match buffer.iter().position(|byte| *byte == b'\n') {
             Some(index) => {
                 buffer.drain(..=index);
             }
             None => buffer.clear(),
         }
+    }
+    if cut && buffer.is_empty() {
+        buffer.clear();
+        file.seek(SeekFrom::Start(0))?;
+        file.read_to_end(&mut buffer)
+            .with_context(|| format!("gagal membaca {}", path.display()))?;
     }
 
     let text = String::from_utf8_lossy(&buffer);
@@ -200,6 +216,33 @@ mod tests {
         let got = tail(&path, 10).unwrap();
         assert_eq!(got.len(), 10);
         assert!(got.iter().all(|l| l.len() == 99));
+    }
+
+    #[test]
+    fn a_file_that_does_not_exist_stands_in_for_an_empty_log() {
+        let dir = temp("absent");
+        // Tail is how the pane reads a log it has not seen yet, so an absent
+        // file is the normal "no entries" case, not an error.
+        assert!(
+            tail(&dir.join("never-written.log"), 200)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn one_line_longer_than_the_window_still_reads() {
+        let dir = temp("longline");
+        let path = dir.join("trace.log");
+        // A single stack trace line bigger than the read window: the window
+        // holds no newline, so clearing the buffer would report the file as
+        // empty.
+        let line = "z".repeat((TAIL_WINDOW as usize) + 10);
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+
+        let got = tail(&path, 5).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].len(), line.len());
     }
 
     #[test]

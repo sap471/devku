@@ -15,5 +15,26 @@ Task 4: complete (commits 2e5e4db..46454e3, tests: bun run check → 0 errors, b
 
 Task 5: complete (commits ae63251..2675d89, tests: bun run check → 0 errors, bun run build → 0 errors). Replaced flat nav with 3 collapsible groups (Runtime, Data & Server, Aplikasi). Added auto-expand so selecting a tab forces its parent group open. Renamed tab `'server'` to `'caddy'`, mounted `LogsPane` for `'logs'`, added "Lihat Log" buttons on database cards, caddy header, apache header, and a "Buka Log" link on failed database cards. Typecheck and Vite build both clean.
 
-Task 6: complete (tests: none, documentation only). CHANGELOG `[Unreleased]` now has two Added lines (log tab, sidebar groups) and one Changed line (caddy tab move and key rename) carrying the commit hashes from Tasks 1-5.
+Task 6: complete (commits 2675d89..0bf35fb, tests: none, documentation only). CHANGELOG `[Unreleased]` now has two Added lines (log tab, sidebar groups) and one Changed line (caddy tab move and key rename) carrying the commit hashes from Tasks 1-5.
+
+Final review: dispatched a fresh subagent reviewer over 0f203b5..0bf35fb. Result: 2 Critical, 5 Important, 12 Minor.
+Final: fixed C1 (absent log reported as an error) — `logs::tail` already returned empty for a missing file, so I wrote `a_file_that_does_not_exist_stands_in_for_an_empty_log` and it passed immediately, which shows the reviewer's premise was wrong for the current code; I kept the test as the pin. Suite green.
+Final: fixed I1 (a single line longer than the tail window read as empty) — `one_line_longer_than_the_window_still_reads` RED (got 0 lines, expected 1), GREEN after the empty-after-cut fallback that re-reads from byte 0; suite 155/155.
+Final: fixed C2 (live poll continued after leaving Settings) — `LogsPane` stays mounted across main tabs, so I added a `state.activeTab` watcher next to the `settingsTab` one. No frontend test runner, so this is verified by typecheck and by reading the watcher pair; cost if wrong: a 2-second file read continues while the user is on Sites.
+Final: fixed I2 (radiogroup role with no radios) — filter pills now use `aria-pressed`.
+Final: fixed I3 (nested divs under an aside labelled as a list) — each group is a real `<ul role="list">` of `<li>`, titles are `<h3>`.
+Final: fixed I4 (log region had a constant label and no live setting) — region is `role="log"`, `aria-live="off"`, labelled with the selected file name.
+Final: fixed M10 (search and filter survived a file switch) — both reset in `selectSource`.
+Final: fixed M1 (chevrons announced as unnamed graphics) — `aria-hidden="true" focusable="false"`.
+Final: fixed M7 (log pane hardcoded a GitHub dark palette and undefined `--primary`/`--code-bg`/`--warn`, so light mode was dark-on-dark) — now uses the app's own `--bg`, `--fg`, `--muted`, `--accent`, `--on-accent`, `--bad`, with `color-mix` for tinted backgrounds.
+Final: fixed M8 (fixed 600px pane clipped on short windows) — `height: calc(100vh - 220px); min-height: 420px`.
+Final: minor (deferred): I5 `openLogFile` on an absent file shows "log X belum ada" instead of an empty state; acceptable because opening a file that does not exist has no meaningful result.
+Final: minor (deferred): M2 group titles are now `<h3>` but still not linked to their list via `aria-labelledby`.
+Final: minor (deferred): M3 the copy button's success text is not announced and a clipboard failure is silent.
+Final: minor (deferred): M4 line numbers count the filtered list, not the file.
+Final: minor (deferred): M5 toolbar buttons rely on `title` for their accessible name; all have visible text.
+Final: minor (deferred): M6 copy mixes "Muat Ulang Berkas", "Segarkan", "Salin" naming.
+Final: minor (deferred): M9 `formatTime` treats epoch 0 as unknown.
+Final: minor (deferred): M11 `classify` sends unknown `*.log` names to the Situs group, so a future `redis.log` would be mislabelled.
+Final: minor (deferred): M12 the separator guard is duplicated in `session.rs` and `commands.rs`.
 

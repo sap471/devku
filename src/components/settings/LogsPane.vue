@@ -115,6 +115,10 @@ function formatTime(unixSecs: number | null): string {
 
 async function selectSource(source: LogSource) {
   state.serviceLogFor = source.name;
+  // A filter or search from the previous file would hide the new file's lines
+  // for no visible reason.
+  logFilter.value = "all";
+  logSearch.value = "";
   await loadServiceLog(source.name, selectedLines.value);
 }
 
@@ -194,6 +198,20 @@ watch(
   }
 );
 
+// The pane can stay mounted while the user switches to the Sites tab, so the
+// poll also has to stop when Settings itself is left, or two panes would read
+// the same file every 2 seconds.
+watch(
+  () => state.activeTab,
+  (tab) => {
+    if (tab !== "settings") {
+      stopLive();
+    } else if (liveLog.value && state.settingsTab === "logs") {
+      startLive();
+    }
+  }
+);
+
 // Auto-select first source if none selected
 watch(
   () => state.logSources,
@@ -237,12 +255,12 @@ onBeforeUnmount(() => {
     </header>
 
     <!-- Loading sources state -->
-    <div v-if="state.logSourcesLoading && state.logSources.length === 0" class="log-state">
+    <div v-if="state.logSourcesLoading && state.logSources.length === 0" class="log-state" role="status">
       <p class="state-msg">Memuat daftar berkas log...</p>
     </div>
 
     <!-- Error loading sources -->
-    <div v-else-if="state.logSourcesError" class="log-state log-error-box">
+    <div v-else-if="state.logSourcesError" class="log-state log-error-box" role="alert">
       <p class="state-msg">Gagal memuat berkas log: {{ state.logSourcesError }}</p>
       <button class="btn btn-sm btn-outline" type="button" @click="loadLogSources()">Coba Lagi</button>
     </div>
@@ -256,28 +274,28 @@ onBeforeUnmount(() => {
     <!-- Main 2-column layout: Source list on left, Viewport on right -->
     <div v-else class="logs-layout">
       <!-- Sources sidebar/list -->
-      <aside class="sources-list" role="list" aria-label="Daftar berkas log">
+      <aside class="sources-list" aria-label="Daftar berkas log">
         <template v-for="(items, kind) in groupedSources" :key="kind">
           <div v-if="items.length > 0" class="source-group">
-            <span class="source-group-title">{{ KIND_LABEL[kind] ?? kind }}</span>
-            <div class="source-group-items">
-              <button
-                v-for="source in items"
-                :key="source.name"
-                class="source-item"
-                :class="{ active: state.serviceLogFor === source.name }"
-                type="button"
-                :aria-current="state.serviceLogFor === source.name ? 'true' : undefined"
-                @click="selectSource(source)"
-              >
-                <div class="source-item-main">
-                  <span class="source-name font-mono">{{ source.name }}</span>
-                  <span class="source-meta">
-                    {{ formatBytes(source.bytes) }} · {{ formatTime(source.modified) }}
+            <h3 class="source-group-title">{{ KIND_LABEL[kind] ?? kind }}</h3>
+            <ul class="source-group-items" role="list">
+              <li v-for="source in items" :key="source.name">
+                <button
+                  class="source-item"
+                  :class="{ active: state.serviceLogFor === source.name }"
+                  type="button"
+                  :aria-current="state.serviceLogFor === source.name ? 'true' : undefined"
+                  @click="selectSource(source)"
+                >
+                  <span class="source-item-main">
+                    <span class="source-name font-mono">{{ source.name }}</span>
+                    <span class="source-meta">
+                      {{ formatBytes(source.bytes) }} · {{ formatTime(source.modified) }}
+                    </span>
                   </span>
-                </div>
-              </button>
-            </div>
+                </button>
+              </li>
+            </ul>
           </div>
         </template>
       </aside>
@@ -288,11 +306,12 @@ onBeforeUnmount(() => {
         <div class="logs-toolbar">
           <div class="toolbar-left">
             <!-- Filter Pills -->
-            <div class="filter-pills" role="radiogroup" aria-label="Filter baris log">
+            <div class="filter-pills" aria-label="Filter baris log">
               <button
                 class="filter-pill"
                 :class="{ active: logFilter === 'all' }"
                 type="button"
+                :aria-pressed="logFilter === 'all'"
                 @click="logFilter = 'all'"
               >
                 Semua
@@ -301,6 +320,7 @@ onBeforeUnmount(() => {
                 class="filter-pill"
                 :class="{ active: logFilter === 'errors' }"
                 type="button"
+                :aria-pressed="logFilter === 'errors'"
                 @click="logFilter = 'errors'"
               >
                 Galat
@@ -309,6 +329,7 @@ onBeforeUnmount(() => {
                 class="filter-pill"
                 :class="{ active: logFilter === 'warnings' }"
                 type="button"
+                :aria-pressed="logFilter === 'warnings'"
                 @click="logFilter = 'warnings'"
               >
                 Peringatan
@@ -415,7 +436,14 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Log Viewport -->
-        <div v-else ref="logsViewport" class="logs-feed-viewport" aria-label="Isi konsol log">
+        <div
+          v-else
+          ref="logsViewport"
+          class="logs-feed-viewport"
+          role="log"
+          aria-live="off"
+          :aria-label="`Isi log ${state.serviceLogFor ?? ''}`"
+        >
           <div class="logs-feed">
             <div
               v-for="item in filteredLogs"
@@ -473,8 +501,10 @@ onBeforeUnmount(() => {
 .logs-layout {
   display: flex;
   gap: 16px;
-  height: 600px;
-  min-height: 480px;
+  /* Follows the window, so a short laptop window never clips the pane behind
+     the Settings page's overflow guard. */
+  height: calc(100vh - 220px);
+  min-height: 420px;
 }
 
 .sources-list {
@@ -497,6 +527,7 @@ onBeforeUnmount(() => {
 }
 
 .source-group-title {
+  margin: 0;
   font-size: 10px;
   font-weight: 700;
   color: var(--muted);
@@ -509,14 +540,19 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .source-item {
   display: flex;
   align-items: center;
+  width: 100%;
   padding: 6px 8px;
   border-radius: 4px;
   border: none;
+  border-left: 2px solid transparent;
   background: transparent;
   color: var(--fg);
   cursor: pointer;
@@ -530,7 +566,7 @@ onBeforeUnmount(() => {
 
 .source-item.active {
   background: var(--bg);
-  border-left: 2px solid var(--primary, var(--fg));
+  border-left-color: var(--accent);
   font-weight: 600;
 }
 
@@ -644,17 +680,19 @@ onBeforeUnmount(() => {
 }
 
 .btn-tool.tool-active {
-  background: var(--primary, #0066cc);
-  color: #fff;
-  border-color: var(--primary, #0066cc);
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
 }
 
 .logs-feed-viewport {
   flex: 1;
   overflow-y: auto;
   overflow-x: auto;
-  background: var(--code-bg, #0d1117);
-  color: var(--code-fg, #c9d1d9);
+  /* The console follows the app theme instead of a fixed dark palette, which
+     left light mode with dark text on a dark pane. */
+  background: var(--bg);
+  color: var(--fg);
   padding: 8px 0;
   font-family: var(--font-mono, monospace);
   font-size: 11.5px;
@@ -674,12 +712,12 @@ onBeforeUnmount(() => {
 }
 
 .log-entry:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface);
 }
 
 .line-number {
   flex: 0 0 40px;
-  color: var(--muted, #6e7681);
+  color: var(--muted);
   user-select: none;
   font-size: 10px;
   text-align: right;
@@ -691,12 +729,12 @@ onBeforeUnmount(() => {
 }
 
 .entry-error {
-  color: var(--bad, #f85149);
-  background: rgba(248, 81, 73, 0.08);
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
 }
 
 .entry-warn {
-  color: var(--warn, #d29922);
+  color: var(--accent);
 }
 
 .log-state,
@@ -728,8 +766,8 @@ onBeforeUnmount(() => {
 }
 
 .log-error-box {
-  background: rgba(248, 81, 73, 0.05);
-  border: 1px solid var(--bad, #f85149);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  border: 1px solid var(--bad);
   border-radius: 4px;
 }
 </style>
