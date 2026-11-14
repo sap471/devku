@@ -96,6 +96,16 @@ export interface DownloadProgress {
   stage: string;
 }
 
+/** One file in `runtime/logs`, as the backend classifies it. */
+export interface LogSource {
+  /** File name including `.log`; `tail_log` takes it without the extension. */
+  name: string;
+  kind: "server" | "database" | "php" | "site";
+  bytes: number;
+  /** Seconds since the Unix epoch, null when unknown. */
+  modified: number | null;
+}
+
 export interface ImportReport {
   imported: number;
   skipped: string[];

@@ -10,6 +10,7 @@ import type {
   PhpCatalogView,
   PhpExtensionsView,
   DownloadProgress,
+  LogSource,
   MoveProgress,
   MoveReport,
   ImportResponse,
@@ -28,7 +29,7 @@ import type {
 
 export type MainTab = "sites" | "settings";
 export type SiteSubTab = "general" | "logs" | "commands";
-export type SettingsSubTab = "php" | "database" | "server" | "apache" | "system";
+export type SettingsSubTab = "php" | "database" | "caddy" | "apache" | "system" | "logs";
 
 export interface ActiveDialogState {
   spec: DialogSpec;
@@ -84,6 +85,15 @@ export const state = reactive({
   logFor: null as string | null,
   logLines: [] as string[],
   logError: null as string | null,
+
+  // Service logs, kept apart from the site log above so the two panes
+  // cannot overwrite each other.
+  logSources: [] as LogSource[],
+  logSourcesLoading: false,
+  logSourcesError: null as string | null,
+  serviceLogFor: null as string | null,
+  serviceLogLines: [] as string[],
+  serviceLogError: null as string | null,
 
   // Runtimes & Catalogs
   runtimesList: null as RuntimeInfo[] | null,
@@ -510,8 +520,52 @@ export async function loadLog(id: string): Promise<void> {
   }
 }
 
-export async function loadCommands(id: string): Promise<void> {
-  if (state.commandsFor === id && state.siteCommands !== null) return;
+export async function loadLogSources(): Promise<void> {
+  state.logSourcesLoading = true;
+  try {
+    state.logSources = await invoke<LogSource[]>("log_sources");
+    state.logSourcesError = null;
+  } catch (err) {
+    state.logSources = [];
+    state.logSourcesError = String(err);
+  } finally {
+    state.logSourcesLoading = false;
+  }
+}
+
+export async function loadServiceLog(name: string, lines: number): Promise<void> {
+  state.serviceLogFor = name;
+  // The file name is the stem; `tail_log` adds `.log` itself so the command
+  // never takes a path.
+  const stem = name.replace(/\.log$/, "");
+  try {
+    const text = await invoke<string[]>("tail_log", { name: stem, lines });
+    if (state.serviceLogFor !== name) return;
+    state.serviceLogLines = text;
+    state.serviceLogError = null;
+  } catch (err) {
+    if (state.serviceLogFor !== name) return;
+    state.serviceLogLines = [];
+    state.serviceLogError = String(err);
+  }
+}
+
+export function openLog(name: string): void {
+  state.activeTab = "settings";
+  state.settingsTab = "logs";
+  void loadLogSources();
+  void loadServiceLog(name, 200);
+}
+
+export async function openLogFile(name: string): Promise<void> {
+  try {
+    await invoke("open_in", { kind: "log", id: name.replace(/\.log$/, ""), target: "explorer" });
+  } catch (err) {
+    state.notice = `Gagal membuka file log: ${String(err)}`;
+  }
+}
+
+export async function loadCommands(id: string): Promise<void> {  if (state.commandsFor === id && state.siteCommands !== null) return;
 
   state.commandsFor = id;
   state.siteCommands = null;
