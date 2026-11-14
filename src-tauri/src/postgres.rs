@@ -63,14 +63,16 @@ impl Postgres {
     /// The config file `initdb` creates is deliberately not copied from a
     /// template; DevKu writes its own so the port and listen address are
     /// exactly what the manager expects.
+    /// PostgreSQL reads both files from inside the datadir, so writing them
+    /// anywhere else means the server silently runs with its defaults (its
+    /// own port and its own `pg_hba.conf`), which is how a startup on 5432
+    /// with the wrong auth method slipped past every check.
     fn config_file(&self) -> PathBuf {
-        self.paths
-            .database_config(DatabaseEngine::Postgres, "postgresql.conf")
+        self.data_dir().join("postgresql.conf")
     }
 
     fn hba_file(&self) -> PathBuf {
-        self.paths
-            .database_config(DatabaseEngine::Postgres, "pg_hba.conf")
+        self.data_dir().join("pg_hba.conf")
     }
 
     /// Every element is exactly one argv token. `run_hidden` passes each
@@ -96,6 +98,10 @@ impl DatabaseBackend for Postgres {
 
     fn label(&self) -> &'static str {
         "PostgreSQL"
+    }
+
+    fn superuser(&self) -> &'static str {
+        "postgres"
     }
 
     fn version(&self) -> &'static str {
@@ -288,15 +294,17 @@ impl DatabaseBackend for Postgres {
 }
 
 impl Postgres {
-    /// `initdb` generates a config and host-based auth file. DevKu writes its
-    /// own so the server binds only loopback and only a port we control.
+    /// `initdb` generates a config and host-based auth file, but its defaults
+    /// bind to every interface and accept `trust` locally, so DevKu writes its
+    /// own. Both files must live in the datadir: PostgreSQL reads them there
+    /// and nowhere else, so an out-of-tree copy is never consulted.
     fn write_config(&self, port: u16) -> Result<()> {
         let config = format!("port = {port}\nlisten_addresses = '127.0.0.1'\n");
         crate::paths::write_atomic(&self.config_file(), &config)?;
 
-        // Loopback only, password auth. The user's `root.pass` is the secret
-        // the superuser was initialized with.
-        let hba = "local all all scram-sha-256\nhost all all 127.0.0.1/32 scram-sha-256\n";
+        // Loopback only, password auth. The stored `root.pass` is the secret
+        // `initdb` was given, so the superuser can log in with it.
+        let hba = "host all all 127.0.0.1/32 scram-sha-256\nhost all all ::1/128 scram-sha-256\n";
         crate::paths::write_atomic(&self.hba_file(), hba)?;
         Ok(())
     }
@@ -391,6 +399,47 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// PostgreSQL reads `postgresql.conf` and `pg_hba.conf` from the datadir
+    /// only. Writing them under `runtime/` left the server on its own defaults
+    /// (every interface, plus initdb's own auth rules) while DevKu believed it
+    /// had configured the port and auth.
+    #[test]
+    fn postgres_config_lives_in_the_datadir() {
+        let root = std::env::temp_dir().join("devku-pg-config");
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths { root: root.clone() };
+        paths.ensure().unwrap();
+        let data = paths.database_data(DatabaseEngine::Postgres);
+        std::fs::create_dir_all(&data).unwrap();
+
+        let backend = Postgres::new(paths.clone());
+        backend.write_config(5433).unwrap();
+
+        let config = std::fs::read_to_string(data.join("postgresql.conf")).unwrap();
+        assert!(config.contains("port = 5433"));
+        assert!(config.contains("listen_addresses = '127.0.0.1'"));
+        let hba = std::fs::read_to_string(data.join("pg_hba.conf")).unwrap();
+        assert!(hba.contains("scram-sha-256"));
+        assert!(!hba.contains("trust"));
+
+        let runtime_copy = paths.database_config(DatabaseEngine::Postgres, "postgresql.conf");
+        assert!(
+            !runtime_copy.exists(),
+            "config harus di datadir, bukan runtime"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn postgres_superuser_is_postgres_not_root() {
+        let paths = Paths {
+            root: std::env::temp_dir().join("devku-pg-user"),
+        };
+        let backend = Postgres::new(paths);
+        assert_eq!(backend.superuser(), "postgres");
     }
 
     /// Runs the real installed `initdb` with exactly the flags production code

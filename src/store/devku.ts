@@ -489,7 +489,7 @@ export async function runOpenIn(targetId: string): Promise<void> {
   if (!siteId) return;
 
   try {
-    await invoke("open_in", { id: siteId, target: targetId });
+    await invoke("open_in", { kind: "site", id: siteId, target: targetId });
   } catch (err) {
     state.notice = `Gagal membuka: ${String(err)}`;
   } finally {
@@ -942,7 +942,7 @@ export async function openDataFolder(engine: string): Promise<void> {
   const path = databaseView(engine)?.data_path;
   if (!path) return;
   try {
-    await invoke("open_in", { id: path, target: "explorer" });
+    await invoke("open_in", { kind: "db", id: engine, target: "explorer" });
   } catch (err) {
     state.notice = `Gagal membuka folder data: ${String(err)}`;
   }

@@ -1095,6 +1095,9 @@ impl Session {
         let password = std::fs::read_to_string(self.paths.database_secret(engine))
             .map(|text| text.trim_end_matches(['\r', '\n']).to_string())
             .unwrap_or_default();
+        // PostgreSQL has roles, not `root@host` accounts: its superuser is
+        // created by `initdb -U postgres`.
+        let user = backend.superuser().to_string();
         let dest = self
             .paths
             .backups()
@@ -1105,7 +1108,7 @@ impl Session {
             let conn = Conn {
                 host: "127.0.0.1".to_string(),
                 port,
-                user: "root".to_string(),
+                user,
                 secret: password,
             };
             backend.dump(&conn, &target)
@@ -1131,15 +1134,18 @@ impl Session {
             runtime.stop_database(engine).await;
         }
 
+        // The data goes first: wiping it needs no binaries, and if it fails the
+        // engine must stay installed so the user can retry instead of facing a
+        // half-removed install that cannot start.
+        if remove_data {
+            backend.wipe()?;
+        }
+
         remove_dir_retry(&self.paths.database_dir(engine))?;
         let _ = std::fs::remove_file(self.paths.database_secret(engine));
         let _ = std::fs::remove_file(self.paths.database_config(engine, "my.ini"));
         let _ = std::fs::remove_file(self.paths.database_config(engine, "postgresql.conf"));
         let _ = std::fs::remove_file(self.paths.database_config(engine, "pg_hba.conf"));
-
-        if remove_data {
-            backend.wipe()?;
-        }
 
         Ok(DatabaseRemoval {
             removed_data: remove_data,

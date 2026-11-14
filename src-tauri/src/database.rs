@@ -82,6 +82,10 @@ pub trait DatabaseBackend: Send + Sync {
     fn engine(&self) -> DatabaseEngine;
     fn label(&self) -> &'static str;
     fn version(&self) -> &'static str;
+    /// The superuser a client logs in as. MariaDB uses `root`; PostgreSQL's
+    /// superuser is named by `initdb -U`, which DevKu always sets to
+    /// `postgres`.
+    fn superuser(&self) -> &'static str;
     fn bin_dir(&self) -> PathBuf;
     fn data_dir(&self) -> PathBuf;
     fn is_installed(&self) -> bool;
@@ -228,6 +232,10 @@ impl DatabaseBackend for Mariadb {
             DatabaseEngine::Mysql => "MySQL",
             _ => "MariaDB",
         }
+    }
+
+    fn superuser(&self) -> &'static str {
+        "root"
     }
 
     fn version(&self) -> &'static str {

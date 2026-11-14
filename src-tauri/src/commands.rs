@@ -1416,6 +1416,16 @@ pub async fn open_in(
                     .ok_or_else(|| format!("site {id} tidak ditemukan"))?;
                 site.root.clone().unwrap_or_else(|| site.path.clone())
             }
+            "db" => {
+                let id = id.ok_or_else(|| "engine database tidak dipilih".to_string())?;
+                let engine: DatabaseEngine =
+                    serde_json::from_value(serde_json::Value::String(id.clone()))
+                        .map_err(|_| format!("engine database tidak dikenal: {id}"))?;
+                let dir = session.paths().database_data(engine);
+                std::fs::create_dir_all(&dir)
+                    .map_err(|err| format!("gagal membuat {}: {err}", dir.display()))?;
+                dir
+            }
             other => return Err(format!("jenis folder tidak dikenal: {other}")),
         }
     };
