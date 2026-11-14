@@ -13,3 +13,5 @@ Task 3: complete (commits 4981f4d..f37c2e3, tests: bun run check → 0 errors). 
 
 Task 4: complete (commits 2e5e4db..46454e3, tests: bun run check → 0 errors, bun run build → 0 errors). Created `src/components/settings/LogsPane.vue`. Handles source grouping (Server, Database, PHP, Situs), filters (Semua, Galat, Peringatan), search, tail depth (200, 1000, 5000), copy, live 2s polling with auto-stop on unmount/tab-switch, and all 4 explicit data states.
 
+Task 5: complete (tests: bun run check → 0 errors, bun run build → 0 errors). Replaced flat nav with 3 collapsible groups (Runtime, Data & Server, Aplikasi). Added auto-expand so selecting a tab forces its parent group open. Renamed tab `'server'` to `'caddy'`, mounted `LogsPane` for `'logs'`, added "Lihat Log" buttons on database cards, caddy header, apache header, and a "Buka Log" link on failed database cards. Typecheck and Vite build both clean.
+

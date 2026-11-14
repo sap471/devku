@@ -33,8 +33,10 @@ import {
   clearDownloads,
   exportConfig,
   importConfig,
+  openLog,
   type SettingsSubTab,
 } from "../../store/devku";
+import LogsPane from "./LogsPane.vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { formatBytes } from "../../log-format";
 
@@ -162,7 +164,36 @@ watch(
   },
 );
 
+const openGroups = reactive({
+  runtime: true,
+  data: true,
+  app: true,
+});
+
+function toggleGroup(group: "runtime" | "data" | "app") {
+  openGroups[group] = !openGroups[group];
+}
+
+function ensureGroupForTab(tab: SettingsSubTab) {
+  if (tab === "php") {
+    openGroups.runtime = true;
+  } else if (tab === "database" || tab === "caddy" || tab === "apache") {
+    openGroups.data = true;
+  } else if (tab === "system" || tab === "logs") {
+    openGroups.app = true;
+  }
+}
+
+watch(
+  () => state.settingsTab,
+  (tab) => {
+    ensureGroupForTab(tab);
+  },
+  { immediate: true },
+);
+
 function setTab(tab: SettingsSubTab) {
+  ensureGroupForTab(tab);
   state.settingsTab = tab;
 }
 </script>
@@ -175,72 +206,157 @@ function setTab(tab: SettingsSubTab) {
         <h2 class="sidebar-title">Pengaturan</h2>
       </div>
 
-      <nav class="settings-nav">
-        <button
-          class="nav-item"
-          :class="{ active: state.settingsTab === 'php' }"
-          type="button"
-          @click="setTab('php')"
-        >
-          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5ZM13 5h-3a1 1 0 0 1-1-1V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5Z"/>
-          </svg>
-          <span>PHP & Runtime</span>
-          <span v-if="installedPhp.length" class="nav-count">{{ installedPhp.length }}</span>
-        </button>
+      <nav class="settings-nav" aria-label="Navigasi Pengaturan">
+        <!-- Grup 1: Runtime -->
+        <div class="nav-group-section">
+          <button
+            class="nav-group-header"
+            type="button"
+            :aria-expanded="openGroups.runtime"
+            aria-controls="group-runtime"
+            @click="toggleGroup('runtime')"
+          >
+            <span class="group-title">Runtime</span>
+            <svg
+              class="group-chevron"
+              :class="{ rotated: openGroups.runtime }"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path d="M4.646 6.646a.5.5 0 0 1 .708 0L8 9.293l2.646-2.647a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 0-.708z"/>
+            </svg>
+          </button>
+          <div v-show="openGroups.runtime" id="group-runtime" class="nav-group-items">
+            <button
+              class="nav-item"
+              :class="{ active: state.settingsTab === 'php' }"
+              type="button"
+              :aria-current="state.settingsTab === 'php' ? 'page' : undefined"
+              @click="setTab('php')"
+            >
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5ZM13 5h-3a1 1 0 0 1-1-1V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5Z"/>
+              </svg>
+              <span>PHP & Runtime</span>
+              <span v-if="installedPhp.length" class="nav-count">{{ installedPhp.length }}</span>
+            </button>
+          </div>
+        </div>
 
-        <button
-          class="nav-item"
-          :class="{ active: state.settingsTab === 'database' }"
-          type="button"
-          @click="setTab('database')"
-        >
-          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1c3.866 0 7 1.343 7 3v8c0 1.657-3.134 3-7 3s-7-1.343-7-3V4c0-1.657 3.134-3 7-3ZM2 6.435V8c0 1.258 2.532 2.308 6 2.477V8.912C4.532 8.743 2 7.693 2 6.435ZM14 8V6.435c0 1.258-2.532 2.308-6 2.477v1.565c3.468-.169 6-1.219 6-2.477ZM8 2.5C4.686 2.5 2 3.395 2 4.5S4.686 6.5 8 6.5s6-.895 6-2-2.686-2-6-2Zm6 8c0 1.258-2.532 2.308-6 2.477v1.565c3.468-.169 6-1.219 6-2.477V10.5ZM2 10.5V12c0 1.258 2.532 2.308 6 2.477V12.912C4.532 12.743 2 11.693 2 10.435Z"/>
-          </svg>
-          <span>Database</span>
-          <span
-            v-if="database.length > 0"
-            class="status-mini-dot"
-            :class="{ 'dot-ok': databaseRunning, 'dot-bad': !databaseRunning }"
-          ></span>
-        </button>
+        <!-- Grup 2: Data & Server -->
+        <div class="nav-group-section">
+          <button
+            class="nav-group-header"
+            type="button"
+            :aria-expanded="openGroups.data"
+            aria-controls="group-data"
+            @click="toggleGroup('data')"
+          >
+            <span class="group-title">Data & Server</span>
+            <svg
+              class="group-chevron"
+              :class="{ rotated: openGroups.data }"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path d="M4.646 6.646a.5.5 0 0 1 .708 0L8 9.293l2.646-2.647a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 0-.708z"/>
+            </svg>
+          </button>
+          <div v-show="openGroups.data" id="group-data" class="nav-group-items">
+            <button
+              class="nav-item"
+              :class="{ active: state.settingsTab === 'database' }"
+              type="button"
+              :aria-current="state.settingsTab === 'database' ? 'page' : undefined"
+              @click="setTab('database')"
+            >
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1c3.866 0 7 1.343 7 3v8c0 1.657-3.134 3-7 3s-7-1.343-7-3V4c0-1.657 3.134-3 7-3ZM2 6.435V8c0 1.258 2.532 2.308 6 2.477V8.912C4.532 8.743 2 7.693 2 6.435ZM14 8V6.435c0 1.258-2.532 2.308-6 2.477v1.565c3.468-.169 6-1.219 6-2.477ZM8 2.5C4.686 2.5 2 3.395 2 4.5S4.686 6.5 8 6.5s6-.895 6-2-2.686-2-6-2Zm6 8c0 1.258-2.532 2.308-6 2.477v1.565c3.468-.169 6-1.219 6-2.477V10.5ZM2 10.5V12c0 1.258 2.532 2.308 6 2.477V12.912C4.532 12.743 2 11.693 2 10.435Z"/>
+              </svg>
+              <span>Database</span>
+              <span
+                v-if="database.length > 0"
+                class="status-mini-dot"
+                :class="{ 'dot-ok': databaseRunning, 'dot-bad': !databaseRunning }"
+              ></span>
+            </button>
 
-        <button
-          class="nav-item"
-          :class="{ active: state.settingsTab === 'server' }"
-          type="button"
-          @click="setTab('server')"
-        >
-          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M0 2.5A1.5 1.5 0 0 1 1.5 1h13A1.5 1.5 0 0 1 16 2.5v3A1.5 1.5 0 0 1 14.5 7h-13A1.5 1.5 0 0 1 0 5.5v-3Zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-13ZM0 10.5A1.5 1.5 0 0 1 1.5 9h13a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 13.5v-3Zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-13Z"/>
-          </svg>
-          <span>Web Server (Caddy)</span>
-        </button>
+            <button
+              class="nav-item"
+              :class="{ active: state.settingsTab === 'caddy' }"
+              type="button"
+              :aria-current="state.settingsTab === 'caddy' ? 'page' : undefined"
+              @click="setTab('caddy')"
+            >
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 2.5A1.5 1.5 0 0 1 1.5 1h13A1.5 1.5 0 0 1 16 2.5v3A1.5 1.5 0 0 1 14.5 7h-13A1.5 1.5 0 0 1 0 5.5v-3Zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-13ZM0 10.5A1.5 1.5 0 0 1 1.5 9h13a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 13.5v-3Zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-13Z"/>
+              </svg>
+              <span>Web Server (Caddy)</span>
+            </button>
 
-        <button
-          class="nav-item"
-          :class="{ active: state.settingsTab === 'apache' }"
-          type="button"
-          @click="setTab('apache')"
-        >
-          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm5.9 7h-2.4a12.6 12.6 0 0 0-1-4.2A6.5 6.5 0 0 1 13.9 7ZM8 1.5c.7.9 1.3 2.6 1.4 5.5H6.6c.1-2.9.7-4.6 1.4-5.5ZM2.1 7a6.5 6.5 0 0 1 3.4-4.2 12.6 12.6 0 0 0-1 4.2H2.1Zm0 2h2.4c.1 1.6.4 3 1 4.2A6.5 6.5 0 0 1 2.1 9Zm4.5 0h2.8c-.1 2.9-.7 4.6-1.4 5.5-.7-.9-1.3-2.6-1.4-5.5Zm4.8 0h2.4a6.5 6.5 0 0 1-3.4 4.2c.6-1.2 1-2.6 1-4.2Z"/>
-          </svg>
-          <span>Apache</span>
-        </button>
+            <button
+              class="nav-item"
+              :class="{ active: state.settingsTab === 'apache' }"
+              type="button"
+              :aria-current="state.settingsTab === 'apache' ? 'page' : undefined"
+              @click="setTab('apache')"
+            >
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm5.9 7h-2.4a12.6 12.6 0 0 0-1-4.2A6.5 6.5 0 0 1 13.9 7ZM8 1.5c.7.9 1.3 2.6 1.4 5.5H6.6c.1-2.9.7-4.6 1.4-5.5ZM2.1 7a6.5 6.5 0 0 1 3.4-4.2 12.6 12.6 0 0 0-1 4.2H2.1Zm0 2h2.4c.1 1.6.4 3 1 4.2A6.5 6.5 0 0 1 2.1 9Zm4.5 0h2.8c-.1 2.9-.7 4.6-1.4 5.5-.7-.9-1.3-2.6-1.4-5.5Zm4.8 0h2.4a6.5 6.5 0 0 1-3.4 4.2c.6-1.2 1-2.6 1-4.2Z"/>
+              </svg>
+              <span>Apache</span>
+            </button>
+          </div>
+        </div>
 
-        <button
-          class="nav-item"
-          :class="{ active: state.settingsTab === 'system' }"
-          type="button"
-          @click="setTab('system')"
-        >
-          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34ZM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858Z"/>
-          </svg>
-          <span>Sistem & Integrasi</span>
-        </button>
+        <!-- Grup 3: Aplikasi -->
+        <div class="nav-group-section">
+          <button
+            class="nav-group-header"
+            type="button"
+            :aria-expanded="openGroups.app"
+            aria-controls="group-app"
+            @click="toggleGroup('app')"
+          >
+            <span class="group-title">Aplikasi</span>
+            <svg
+              class="group-chevron"
+              :class="{ rotated: openGroups.app }"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path d="M4.646 6.646a.5.5 0 0 1 .708 0L8 9.293l2.646-2.647a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 0-.708z"/>
+            </svg>
+          </button>
+          <div v-show="openGroups.app" id="group-app" class="nav-group-items">
+            <button
+              class="nav-item"
+              :class="{ active: state.settingsTab === 'system' }"
+              type="button"
+              :aria-current="state.settingsTab === 'system' ? 'page' : undefined"
+              @click="setTab('system')"
+            >
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34ZM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858Z"/>
+              </svg>
+              <span>Sistem & Integrasi</span>
+            </button>
+
+            <button
+              class="nav-item"
+              :class="{ active: state.settingsTab === 'logs' }"
+              type="button"
+              :aria-current="state.settingsTab === 'logs' ? 'page' : undefined"
+              @click="setTab('logs')"
+            >
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h12zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"/>
+                <path d="M4 4h8v1H4V4zm0 3h8v1H4V7zm0 3h5v1H4v-1z"/>
+              </svg>
+              <span>Log Layanan</span>
+            </button>
+          </div>
+        </div>
       </nav>
     </aside>
 
@@ -572,6 +688,11 @@ function setTab(tab: SettingsSubTab) {
                   <span class="setting-name">Galat</span>
                   <span class="setting-desc font-mono">{{ db.detail }}</span>
                 </div>
+                <div class="setting-ctrl">
+                  <button class="btn btn-sm btn-outline" type="button" @click="openLog(db.engine)">
+                    Buka Log
+                  </button>
+                </div>
               </div>
 
               <div class="setting-row">
@@ -635,11 +756,17 @@ function setTab(tab: SettingsSubTab) {
               </div>
             </div>
 
-            <div v-if="db.installed" class="card-foot danger-foot">
-              <span class="foot-warning">Hapus instalasi {{ db.label }} dan seluruh binari</span>
-              <button class="btn btn-sm btn-danger" type="button" @click="askRemoveDatabase(db.engine)">
-                Hapus {{ db.label }}
+            <div class="card-foot">
+              <button class="btn btn-sm btn-quiet" type="button" @click="openLog(db.engine)">
+                Lihat Log
               </button>
+              <div class="foot-spacer"></div>
+              <template v-if="db.installed">
+                <span class="foot-warning">Hapus instalasi {{ db.label }} dan seluruh binari</span>
+                <button class="btn btn-sm btn-danger" type="button" @click="askRemoveDatabase(db.engine)">
+                  Hapus {{ db.label }}
+                </button>
+              </template>
             </div>
           </div>
 
@@ -665,12 +792,15 @@ function setTab(tab: SettingsSubTab) {
       </section>
 
       <!-- 3. TAB: WEB SERVER (CADDY) -->
-      <section v-else-if="state.settingsTab === 'server'" class="tab-pane">
+      <section v-else-if="state.settingsTab === 'caddy'" class="tab-pane">
         <header class="pane-header">
           <div>
             <h2 class="pane-title">Web Server & Domain Resolver (Caddy)</h2>
             <p class="pane-desc">Caddy melayani routing domain lokal otomatis dengan sertifikat TLS/HTTPS terpercaya.</p>
           </div>
+          <button class="btn btn-sm btn-quiet" type="button" @click="openLog('caddy')">
+            Lihat Log Caddy
+          </button>
         </header>
 
         <div class="card">
@@ -737,6 +867,9 @@ function setTab(tab: SettingsSubTab) {
               domain di port 80/443, termasuk HTTPS; port Apache tidak pernah dibuka ke luar.
             </p>
           </div>
+          <button class="btn btn-sm btn-quiet" type="button" @click="openLog('apache')">
+            Lihat Log Apache
+          </button>
         </header>
 
         <div class="card">
@@ -1086,6 +1219,11 @@ function setTab(tab: SettingsSubTab) {
           </div>
         </div>
       </section>
+
+      <!-- 6. TAB: LOGS -->
+      <section v-else-if="state.settingsTab === 'logs'" class="tab-pane tab-pane-wide">
+        <LogsPane />
+      </section>
     </main>
   </div>
 </template>
@@ -1122,6 +1260,51 @@ function setTab(tab: SettingsSubTab) {
 
 .settings-nav {
   padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nav-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: color 0.1s;
+}
+
+.nav-group-header:hover {
+  color: var(--fg);
+}
+
+.group-chevron {
+  width: 12px;
+  height: 12px;
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+
+.group-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+.nav-group-items {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1190,6 +1373,14 @@ function setTab(tab: SettingsSubTab) {
   flex-direction: column;
   gap: 20px;
   max-width: 800px;
+}
+
+.tab-pane-wide {
+  max-width: none;
+}
+
+.foot-spacer {
+  flex: 1;
 }
 
 .pane-header {
