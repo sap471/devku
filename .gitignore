@@ -35,3 +35,6 @@ www/
 *.sw?
 
 .commandcode
+
+# Keluaran skill archify (diagram HTML besar, dibuat ulang kapan saja)
+.archify/
